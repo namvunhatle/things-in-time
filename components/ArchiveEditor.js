@@ -39,9 +39,18 @@ export default function ArchiveEditor({ archive }) {
   useEffect(() => {
     const key = `archive_recovery_${archive.id}`;
     const stored = localStorage.getItem(key) || sessionStorage.getItem(key) || '';
-    if (stored) localStorage.setItem(key, stored);
+    if (stored) {
+      localStorage.setItem(key, stored);
+      try {
+        const recent = JSON.parse(localStorage.getItem('archive_recent') || '[]').filter(item => item.id !== archive.id);
+        recent.unshift({ id: archive.id, title: archive.title, recoveryUrl: stored, lastOpened: new Date().toISOString() });
+        localStorage.setItem('archive_recent', JSON.stringify(recent.slice(0, 20)));
+      } catch {
+        localStorage.setItem('archive_recent', JSON.stringify([{ id: archive.id, title: archive.title, recoveryUrl: stored, lastOpened: new Date().toISOString() }]));
+      }
+    }
     setRecoveryUrl(stored);
-  }, [archive.id]);
+  }, [archive.id, archive.title]);
 
   function canvasPoint(clientX, clientY) {
     const rect = canvasRef.current.getBoundingClientRect();
