@@ -7,6 +7,7 @@ export const metadata = { title: 'secure editor access' };
 
 export default async function EditorClaimPage({ params }) {
   const { archiveId } = await params;
-  if (!await readArchive(archiveId)) notFound();
-  return <EditorClaim archiveId={archiveId} />;
+  const archive = await readArchive(archiveId);
+  if (!archive) notFound();
+  return <EditorClaim archiveId={archiveId} archiveTitle={archive.title} />;
 }

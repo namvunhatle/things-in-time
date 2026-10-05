@@ -36,7 +36,12 @@ export default function ArchiveEditor({ archive }) {
   const shareUrl = typeof window === 'undefined' ? `/a/${archive.id}` : `${window.location.origin}/a/${archive.id}`;
 
   useEffect(() => { itemsRef.current = items; }, [items]);
-  useEffect(() => { setRecoveryUrl(sessionStorage.getItem(`archive_recovery_${archive.id}`) || ''); }, [archive.id]);
+  useEffect(() => {
+    const key = `archive_recovery_${archive.id}`;
+    const stored = localStorage.getItem(key) || sessionStorage.getItem(key) || '';
+    if (stored) localStorage.setItem(key, stored);
+    setRecoveryUrl(stored);
+  }, [archive.id]);
 
   function canvasPoint(clientX, clientY) {
     const rect = canvasRef.current.getBoundingClientRect();

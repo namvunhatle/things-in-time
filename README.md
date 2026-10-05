@@ -66,6 +66,8 @@ Mở `http://127.0.0.1:3000/portal` để tạo một archive mới. Mỗi archi
 
 Dữ liệu demo nằm trong `.archive-data/` và bị Git ignore. Share URL local chỉ hoạt động trên chính máy đang chạy server. Trước khi gửi link qua internet hoặc deploy lên Vercel, cần thay local filesystem bằng persistent database + object storage; filesystem của serverless deployment không phải nơi lưu archive lâu dài.
 
+Sau khi editor recovery link được mở, browser lưu link đó trong `localStorage` và `/portal` hiện mục “saved on this browser”. Cookie editor vẫn là HttpOnly; link có fragment chỉ dùng để cấp lại cookie khi quay lại. Copy hoặc bookmark recovery link trước khi đổi browser hoặc thiết bị.
+
 ## Trạng thái kiểm tra — 05/10/2026
 
 Dependencies đã cài đủ. Production build Next.js 16.3.8 đã thành công. Kiểm tra nội dung, thứ tự thời gian, filter, loại draft và nhãn ngày/giờ đã qua. Logic passcode đã qua kiểm tra: đóng khi thiếu cấu hình, đúng/sai mã, chữ ký, thời hạn và thu hồi session khi đổi mã. Review source đã kiểm tra noindex, bảo vệ media và nội dung mẫu. Chưa xác nhận giao diện trong trình duyệt hoặc deployment: môi trường thực thi chặn truy cập mạng và chặn mở cổng localhost. Không có URL production đã được xác nhận.

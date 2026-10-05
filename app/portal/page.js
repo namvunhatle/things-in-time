@@ -1,4 +1,5 @@
 import PortalCreateForm from '../../components/PortalCreateForm';
+import RecentArchives from '../../components/RecentArchives';
 
 export const metadata = { title: 'create an archive' };
 
@@ -10,7 +11,8 @@ export default function PortalPage() {
       <h1>make a quiet place<br />for what you want to keep.</h1>
       <p>start with an empty canvas. drop photos anywhere, move them around, then share a password-protected view.</p>
     </section>
+    <RecentArchives />
     <PortalCreateForm />
-    <p className="portal-note">local demo · files stay on this machine · save the editor link</p>
+    <p className="portal-note">this browser remembers editor links · copy the recovery link before switching devices</p>
   </main>;
 }
