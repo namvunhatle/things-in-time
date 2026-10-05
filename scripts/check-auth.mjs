@@ -1,0 +1,21 @@
+import assert from 'node:assert/strict';
+import { randomBytes } from 'node:crypto';
+import { hasAccess, matchesPasscode, createSession } from '../lib/auth.js';
+
+process.env.ARCHIVE_ACCESS = 'private';
+delete process.env.ARCHIVE_PASSCODE;
+delete process.env.ARCHIVE_SESSION_SECRET;
+assert.equal(hasAccess(), false);
+process.env.ARCHIVE_PASSCODE = randomBytes(24).toString('base64url');
+process.env.ARCHIVE_SESSION_SECRET = randomBytes(48).toString('base64url');
+assert.equal(matchesPasscode('wrong'), false);
+assert.equal(matchesPasscode(process.env.ARCHIVE_PASSCODE), true);
+const session = createSession();
+assert.equal(hasAccess(session), true);
+assert.equal(hasAccess(session + 'a'), false);
+assert.equal(hasAccess('1.' + session.split('.')[1]), false);
+process.env.ARCHIVE_PASSCODE += 'changed';
+assert.equal(hasAccess(session), false);
+process.env.ARCHIVE_ACCESS = 'unlisted';
+assert.equal(hasAccess(), true);
+console.log('Passcode checks passed.');

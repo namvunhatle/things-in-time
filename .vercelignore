@@ -1,0 +1,11 @@
+.env*
+!.env.example
+node_modules
+.git
+.next
+qa
+README.md
+.archive-project.json
+.archive-data
+.confidential
+source

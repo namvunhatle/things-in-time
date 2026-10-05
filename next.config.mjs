@@ -1,0 +1,15 @@
+export default {
+  poweredByHeader: false,
+  outputFileTracingIncludes: {
+    '/*': ['./.confidential/entries/**/*.md', './.confidential/photos/**/*'],
+  },
+  async headers() {
+    return [{ source: '/:path*', headers: [
+      { key: 'X-Robots-Tag', value: 'noindex, nofollow, noarchive, nosnippet, noimageindex' },
+      { key: 'Referrer-Policy', value: 'no-referrer' },
+      { key: 'X-Content-Type-Options', value: 'nosniff' },
+      { key: 'X-Frame-Options', value: 'DENY' },
+      { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
+    ] }];
+  },
+};
