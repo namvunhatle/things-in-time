@@ -252,9 +252,10 @@ export default function ArchiveEditor({ archive }) {
         </div>
       </article> : item.type === 'youtube' ? <div key={item.id} className="canvas-item youtube-sticky" style={itemStyle(item, archive)} onPointerDown={event => beginMove(event, item)}>
         <div className="youtube-frame youtube-placeholder" aria-label="YouTube video preview">
+          {item.thumbnailFileName && <img className="youtube-thumbnail" src={imageUrl(archive.id, item.thumbnailFileName)} alt="" draggable="false" />}
           <span className="youtube-play" aria-hidden="true">▶</span>
         </div>
-        <div className="youtube-card-label"><span>youtube</span><small>drag video</small></div>
+        <div className="youtube-card-label"><span>{item.title || 'youtube'}</span><small>drag video</small></div>
       </div> : <div key={item.id} className="canvas-item sticky-photo" style={itemStyle(item, archive)} onPointerDown={event => beginMove(event, item)}>
         <img src={imageUrl(archive.id, item.fileName)} alt={item.alt || ''} draggable="false" />
       </div>)}

@@ -43,11 +43,12 @@ function YoutubePlayer({ item, archive }) {
         referrerPolicy="strict-origin-when-cross-origin"
         allowFullScreen
       /> : <button className="youtube-placeholder" type="button" onClick={() => setPlaying(true)} aria-label="play YouTube video in this archive">
+        {item.thumbnailFileName && <img className="youtube-thumbnail" src={`/api/archive-media/${archive.id}/${item.thumbnailFileName}`} alt="" loading="lazy" decoding="async" />}
         <span className="youtube-play" aria-hidden="true">▶</span>
         <span>play here</span>
       </button>}
     </div>
-    <div className="youtube-card-label"><span>youtube</span>{playing && <small>playing in archive</small>}</div>
+    <div className="youtube-card-label"><span>{item.title || 'youtube'}</span>{playing && <small>playing in archive</small>}</div>
   </div>;
 }
 
