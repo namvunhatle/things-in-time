@@ -1,3 +1,7 @@
+'use client';
+
+import { useState } from 'react';
+
 function dateLabel(value) {
   return new Intl.DateTimeFormat('en-US', {
     month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC',
@@ -28,6 +32,25 @@ function itemStyle(item, archive) {
   };
 }
 
+function YoutubePlayer({ item, archive }) {
+  const [playing, setPlaying] = useState(false);
+  return <div className="canvas-item youtube-sticky youtube-sticky-view" style={itemStyle(item, archive)}>
+    <div className="youtube-frame">
+      {playing ? <iframe
+        src={`https://www.youtube-nocookie.com/embed/${item.videoId}?autoplay=1&rel=0`}
+        title="YouTube video player"
+        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+        referrerPolicy="strict-origin-when-cross-origin"
+        allowFullScreen
+      /> : <button className="youtube-placeholder" type="button" onClick={() => setPlaying(true)} aria-label="play YouTube video in this archive">
+        <span className="youtube-play" aria-hidden="true">▶</span>
+        <span>play here</span>
+      </button>}
+    </div>
+    <div className="youtube-card-label"><span>youtube</span>{playing && <small>playing in archive</small>}</div>
+  </div>;
+}
+
 export default function ArchiveCanvasView({ archive }) {
   return <div className="archive-canvas viewer-canvas wysiwyg-canvas" style={{ aspectRatio: `${archive.canvas.width} / ${archive.canvas.height}` }}>
     {!archive.items.length && <p className="viewer-empty">nothing here yet.</p>}
@@ -42,7 +65,7 @@ export default function ArchiveCanvasView({ archive }) {
         {item.time && <span>{timeLabel(item.time)}</span>}
       </div>
       <div className="note-content">{paragraphs(item.content)}</div>
-    </article> : <figure
+    </article> : item.type === 'youtube' ? <YoutubePlayer key={item.id} item={item} archive={archive} /> : <figure
       key={item.id}
       className="canvas-item sticky-photo sticky-photo-view"
       style={itemStyle(item, archive)}

@@ -29,6 +29,7 @@ export default function ArchiveEditor({ archive }) {
   const [dragging, setDragging] = useState(null);
   const [dropTarget, setDropTarget] = useState(null);
   const [recoveryUrl, setRecoveryUrl] = useState('');
+  const [youtubeUrl, setYoutubeUrl] = useState('');
   const canvasRef = useRef(null);
   const itemsRef = useRef(items);
   const noteRefs = useRef(new Map());
@@ -109,6 +110,27 @@ export default function ArchiveEditor({ archive }) {
     }
     setDropTarget(null);
     setStatus('saved');
+  }
+
+  async function addYoutube(event) {
+    event.preventDefault();
+    if (!youtubeUrl.trim()) return;
+    const count = itemsRef.current.filter(item => item.type === 'youtube').length;
+    setStatus('adding video…');
+    try {
+      const response = await fetch(`/api/archives/${archive.id}/youtube`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: youtubeUrl, x: 760 - count * 24, y: 90 + count * 230 }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'could not add video');
+      replaceItems(current => [...current, result.item]);
+      setYoutubeUrl('');
+      setStatus('saved');
+    } catch (error) {
+      setStatus(error.message || 'couldn’t add video');
+    }
   }
 
   function dropOnCanvas(event) {
@@ -198,12 +220,16 @@ export default function ArchiveEditor({ archive }) {
       <div className="editor-actions">
         <span>{status}</span>
         <button type="button" onClick={addNote}>+ text dump</button>
+        <form className="youtube-add-form" onSubmit={addYoutube}>
+          <input type="url" value={youtubeUrl} onChange={event => setYoutubeUrl(event.target.value)} placeholder="paste YouTube link" aria-label="YouTube link" />
+          <button type="submit">+ video</button>
+        </form>
         {recoveryUrl && <button type="button" onClick={copyRecoveryLink}>copy editor recovery link</button>}
         <button type="button" onClick={copyShareLink}>copy share link</button>
         <a href={`/a/${archive.id}`} target="_blank" rel="noreferrer">open view ↗</a>
       </div>
     </header>
-    <div className="editor-help">add a text dump, then drop a photo onto that note to place it beside the writing. everything can still be moved.</div>
+    <div className="editor-help">add a text dump, drop in photos, or paste a YouTube link. photos and videos can all be moved freely.</div>
     <div ref={canvasRef} className={`archive-canvas editor-canvas${dragging ? ' is-dragging' : ''}`} style={{ aspectRatio: `${archive.canvas.width} / ${archive.canvas.height}` }} onDragOver={event => event.preventDefault()} onDrop={dropOnCanvas}>
       {!items.length && <div className="canvas-empty"><button type="button" onClick={addNote}>start with a text dump</button><small>then drop a photo directly onto the note</small></div>}
       {items.map(item => item.type === 'note' ? <article
@@ -224,7 +250,12 @@ export default function ArchiveEditor({ archive }) {
           <textarea ref={node => { if (node) noteRefs.current.set(item.id, node); else noteRefs.current.delete(item.id); }} className="note-editor" value={item.content} maxLength={10000} aria-label={`text dump from ${dateLabel(item.date)}`} placeholder="type it here. leave it rough." onChange={event => editNote(item.id, event.target.value)} onBlur={() => save(itemsRef.current)} />
           <div className="note-drop-hint">drop a photo on this entry → it’ll sit beside the writing</div>
         </div>
-      </article> : <div key={item.id} className="canvas-item sticky-photo" style={itemStyle(item, archive)} onPointerDown={event => beginMove(event, item)}>
+      </article> : item.type === 'youtube' ? <div key={item.id} className="canvas-item youtube-sticky" style={itemStyle(item, archive)} onPointerDown={event => beginMove(event, item)}>
+        <div className="youtube-frame youtube-placeholder" aria-label="YouTube video preview">
+          <span className="youtube-play" aria-hidden="true">▶</span>
+        </div>
+        <div className="youtube-card-label"><span>youtube</span><small>drag video</small></div>
+      </div> : <div key={item.id} className="canvas-item sticky-photo" style={itemStyle(item, archive)} onPointerDown={event => beginMove(event, item)}>
         <img src={imageUrl(archive.id, item.fileName)} alt={item.alt || ''} draggable="false" />
       </div>)}
     </div>
