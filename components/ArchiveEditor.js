@@ -9,14 +9,16 @@ const itemStyle = (item, archive) => ({
   width: `${item.width / archive.canvas.width * 100}%`,
 });
 
-function noteDate(item) {
-  const date = new Date(`${item.date}T${item.time || '00:00'}:00`);
-  if (Number.isNaN(date.getTime())) return [item.date, item.time].filter(Boolean).join(' · ');
-  return new Intl.DateTimeFormat('en', {
-    day: 'numeric', month: 'short', year: 'numeric',
-    hour: item.time ? 'numeric' : undefined,
-    minute: item.time ? '2-digit' : undefined,
-  }).format(date).toLowerCase();
+function dateLabel(value) {
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC',
+  }).format(new Date(`${value}T12:00:00Z`)).toLowerCase();
+}
+
+function timeLabel(value) {
+  if (!value) return '';
+  const [hour, minute] = value.split(':').map(Number);
+  return `${hour % 12 || 12}:${String(minute).padStart(2, '0')}${hour < 12 ? 'am' : 'pm'}`;
 }
 
 export default function ArchiveEditor({ archive }) {
@@ -205,16 +207,22 @@ export default function ArchiveEditor({ archive }) {
       {!items.length && <div className="canvas-empty"><button type="button" onClick={addNote}>start with a text dump</button><small>then drop a photo directly onto the note</small></div>}
       {items.map(item => item.type === 'note' ? <article
         key={item.id}
-        className={`canvas-note${dropTarget === item.id ? ' is-drop-target' : ''}`}
+        className={`canvas-note canvas-entry${dropTarget === item.id ? ' is-drop-target' : ''}`}
         style={itemStyle(item, archive)}
         onDragEnter={event => { event.preventDefault(); setDropTarget(item.id); }}
         onDragOver={event => event.preventDefault()}
         onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget)) setDropTarget(null); }}
         onDrop={event => dropOnNote(event, item)}
       >
-        <div className="note-handle" onPointerDown={event => beginMove(event, item)}><span>{noteDate(item)}</span><span>drag</span></div>
-        <textarea ref={node => { if (node) noteRefs.current.set(item.id, node); else noteRefs.current.delete(item.id); }} className="note-editor" value={item.content} maxLength={10000} aria-label={`text dump from ${noteDate(item)}`} placeholder="type it here. leave it rough." onChange={event => editNote(item.id, event.target.value)} onBlur={() => save(itemsRef.current)} />
-        <div className="note-drop-hint">drop photo here → it’ll sit beside this note</div>
+        <div className="note-meta" onPointerDown={event => beginMove(event, item)}>
+          <time dateTime={`${item.date}T${item.time}+07:00`}>{dateLabel(item.date)}</time>
+          {item.time && <span>{timeLabel(item.time)}</span>}
+          <small>drag note</small>
+        </div>
+        <div className="note-writing">
+          <textarea ref={node => { if (node) noteRefs.current.set(item.id, node); else noteRefs.current.delete(item.id); }} className="note-editor" value={item.content} maxLength={10000} aria-label={`text dump from ${dateLabel(item.date)}`} placeholder="type it here. leave it rough." onChange={event => editNote(item.id, event.target.value)} onBlur={() => save(itemsRef.current)} />
+          <div className="note-drop-hint">drop a photo on this entry → it’ll sit beside the writing</div>
+        </div>
       </article> : <div key={item.id} className="canvas-item" style={itemStyle(item, archive)} onPointerDown={event => beginMove(event, item)}>
         <img src={imageUrl(archive.id, item.fileName)} alt={item.alt || ''} draggable="false" />
       </div>)}
