@@ -2,8 +2,21 @@
 
 import { useEffect, useRef, useState } from 'react';
 
-function imageUrl(archiveId, fileName) {
-  return `/api/archive-media/${archiveId}/${fileName}`;
+const imageUrl = (archiveId, fileName) => `/api/archive-media/${archiveId}/${fileName}`;
+const itemStyle = (item, archive) => ({
+  left: `${item.x / archive.canvas.width * 100}%`,
+  top: `${item.y / archive.canvas.height * 100}%`,
+  width: `${item.width / archive.canvas.width * 100}%`,
+});
+
+function noteDate(item) {
+  const date = new Date(`${item.date}T${item.time || '00:00'}:00`);
+  if (Number.isNaN(date.getTime())) return [item.date, item.time].filter(Boolean).join(' · ');
+  return new Intl.DateTimeFormat('en', {
+    day: 'numeric', month: 'short', year: 'numeric',
+    hour: item.time ? 'numeric' : undefined,
+    minute: item.time ? '2-digit' : undefined,
+  }).format(date).toLowerCase();
 }
 
 export default function ArchiveEditor({ archive }) {
@@ -11,9 +24,11 @@ export default function ArchiveEditor({ archive }) {
   const [title, setTitle] = useState(archive.title);
   const [status, setStatus] = useState('saved');
   const [dragging, setDragging] = useState(null);
+  const [dropTarget, setDropTarget] = useState(null);
   const [recoveryUrl, setRecoveryUrl] = useState('');
   const canvasRef = useRef(null);
   const itemsRef = useRef(items);
+  const noteRefs = useRef(new Map());
   const shareUrl = typeof window === 'undefined' ? `/a/${archive.id}` : `${window.location.origin}/a/${archive.id}`;
 
   useEffect(() => { itemsRef.current = items; }, [items]);
@@ -25,6 +40,14 @@ export default function ArchiveEditor({ archive }) {
       x: (clientX - rect.left) / rect.width * archive.canvas.width,
       y: (clientY - rect.top) / rect.height * archive.canvas.height,
     };
+  }
+
+  function replaceItems(updater) {
+    setItems(current => {
+      const next = typeof updater === 'function' ? updater(current) : updater;
+      itemsRef.current = next;
+      return next;
+    });
   }
 
   async function save(nextItems = itemsRef.current, nextTitle = title) {
@@ -42,7 +65,26 @@ export default function ArchiveEditor({ archive }) {
     }
   }
 
-  async function uploadFiles(files, point) {
+  async function addNote() {
+    const count = itemsRef.current.filter(item => item.type === 'note').length;
+    setStatus('adding note…');
+    try {
+      const response = await fetch(`/api/archives/${archive.id}/notes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ x: 90 + count * 24, y: 90 + count * 34 }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'could not add note');
+      replaceItems(current => [...current, result.item]);
+      setStatus('saved');
+      requestAnimationFrame(() => noteRefs.current.get(result.item.id)?.focus());
+    } catch (error) {
+      setStatus(error.message || 'couldn’t add note');
+    }
+  }
+
+  async function uploadFiles(files, point, attachedTo = null) {
     const images = [...files].filter(file => file.type.startsWith('image/'));
     if (!images.length) return;
     setStatus('uploading…');
@@ -52,6 +94,7 @@ export default function ArchiveEditor({ archive }) {
       data.set('file', file);
       data.set('x', String(point.x + index * 22));
       data.set('y', String(point.y + index * 22));
+      if (attachedTo) data.set('attachedTo', attachedTo);
       const response = await fetch(`/api/archives/${archive.id}/media`, { method: 'POST', body: data });
       const result = await response.json();
       if (!response.ok) {
@@ -59,16 +102,25 @@ export default function ArchiveEditor({ archive }) {
         return;
       }
       next = [...next, result.item];
-      setItems(next);
-      itemsRef.current = next;
+      replaceItems(next);
     }
+    setDropTarget(null);
     setStatus('saved');
   }
 
-  function drop(event) {
+  function dropOnCanvas(event) {
     event.preventDefault();
-    const point = canvasPoint(event.clientX, event.clientY);
-    uploadFiles(event.dataTransfer.files, point);
+    uploadFiles(event.dataTransfer.files, canvasPoint(event.clientX, event.clientY));
+  }
+
+  function dropOnNote(event, note) {
+    event.preventDefault();
+    event.stopPropagation();
+    setDropTarget(null);
+    uploadFiles(event.dataTransfer.files, {
+      x: Math.min(archive.canvas.width - 280, note.x + note.width + 28),
+      y: note.y,
+    }, note.id);
   }
 
   function beginMove(event, item) {
@@ -81,14 +133,22 @@ export default function ArchiveEditor({ archive }) {
     if (!dragging) return;
     function move(event) {
       const point = canvasPoint(event.clientX, event.clientY);
-      setItems(current => {
-        const next = current.map(item => item.id === dragging.id ? {
-          ...item,
-          x: Math.max(0, Math.min(archive.canvas.width - item.width, point.x - dragging.offsetX)),
-          y: Math.max(0, Math.min(archive.canvas.height - 40, point.y - dragging.offsetY)),
-        } : item);
-        itemsRef.current = next;
-        return next;
+      replaceItems(current => {
+        const moved = current.find(item => item.id === dragging.id);
+        if (!moved) return current;
+        const x = Math.max(0, Math.min(archive.canvas.width - moved.width, point.x - dragging.offsetX));
+        const y = Math.max(0, Math.min(archive.canvas.height - 40, point.y - dragging.offsetY));
+        const dx = x - moved.x;
+        const dy = y - moved.y;
+        return current.map(item => {
+          if (item.id === moved.id) return { ...item, x, y };
+          if (moved.type === 'note' && item.attachedTo === moved.id) return {
+            ...item,
+            x: Math.max(0, Math.min(archive.canvas.width - item.width, item.x + dx)),
+            y: Math.max(0, Math.min(archive.canvas.height - 40, item.y + dy)),
+          };
+          return item;
+        });
       });
     }
     function end() {
@@ -102,6 +162,11 @@ export default function ArchiveEditor({ archive }) {
       window.removeEventListener('pointerup', end);
     };
   }, [dragging]);
+
+  function editNote(id, content) {
+    replaceItems(current => current.map(item => item.id === id ? { ...item, content } : item));
+    setStatus('unsaved');
+  }
 
   async function copyShareLink() {
     try {
@@ -129,26 +194,28 @@ export default function ArchiveEditor({ archive }) {
       </div>
       <div className="editor-actions">
         <span>{status}</span>
+        <button type="button" onClick={addNote}>+ text dump</button>
         {recoveryUrl && <button type="button" onClick={copyRecoveryLink}>copy editor recovery link</button>}
         <button type="button" onClick={copyShareLink}>copy share link</button>
         <a href={`/a/${archive.id}`} target="_blank" rel="noreferrer">open view ↗</a>
       </div>
     </header>
-    <div className="editor-help">drop photos anywhere on the canvas. drag them again to move them.</div>
-    <div
-      ref={canvasRef}
-      className={`archive-canvas editor-canvas${dragging ? ' is-dragging' : ''}`}
-      style={{ aspectRatio: `${archive.canvas.width} / ${archive.canvas.height}` }}
-      onDragOver={event => event.preventDefault()}
-      onDrop={drop}
-    >
-      {!items.length && <div className="canvas-empty"><span>drop a photo here</span><small>jpg, png, webp, gif or avif · max 10 MB</small></div>}
-      {items.map(item => <div
+    <div className="editor-help">add a text dump, then drop a photo onto that note to place it beside the writing. everything can still be moved.</div>
+    <div ref={canvasRef} className={`archive-canvas editor-canvas${dragging ? ' is-dragging' : ''}`} style={{ aspectRatio: `${archive.canvas.width} / ${archive.canvas.height}` }} onDragOver={event => event.preventDefault()} onDrop={dropOnCanvas}>
+      {!items.length && <div className="canvas-empty"><button type="button" onClick={addNote}>start with a text dump</button><small>then drop a photo directly onto the note</small></div>}
+      {items.map(item => item.type === 'note' ? <article
         key={item.id}
-        className="canvas-item"
-        style={{ left: `${item.x / archive.canvas.width * 100}%`, top: `${item.y / archive.canvas.height * 100}%`, width: `${item.width / archive.canvas.width * 100}%` }}
-        onPointerDown={event => beginMove(event, item)}
+        className={`canvas-note${dropTarget === item.id ? ' is-drop-target' : ''}`}
+        style={itemStyle(item, archive)}
+        onDragEnter={event => { event.preventDefault(); setDropTarget(item.id); }}
+        onDragOver={event => event.preventDefault()}
+        onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget)) setDropTarget(null); }}
+        onDrop={event => dropOnNote(event, item)}
       >
+        <div className="note-handle" onPointerDown={event => beginMove(event, item)}><span>{noteDate(item)}</span><span>drag</span></div>
+        <textarea ref={node => { if (node) noteRefs.current.set(item.id, node); else noteRefs.current.delete(item.id); }} className="note-editor" value={item.content} maxLength={10000} aria-label={`text dump from ${noteDate(item)}`} placeholder="type it here. leave it rough." onChange={event => editNote(item.id, event.target.value)} onBlur={() => save(itemsRef.current)} />
+        <div className="note-drop-hint">drop photo here → it’ll sit beside this note</div>
+      </article> : <div key={item.id} className="canvas-item" style={itemStyle(item, archive)} onPointerDown={event => beginMove(event, item)}>
         <img src={imageUrl(archive.id, item.fileName)} alt={item.alt || ''} draggable="false" />
       </div>)}
     </div>

@@ -16,7 +16,11 @@ export async function POST(request, { params }) {
     if (!hasEditorSession(archive, editorToken)) return Response.json({ error: 'editor session denied.' }, { status: 403 });
     const file = form.get('file');
     if (!(file instanceof File)) return Response.json({ error: 'choose an image.' }, { status: 400 });
-    const item = await addArchiveImage(archive, file, { x: form.get('x'), y: form.get('y') });
+    const item = await addArchiveImage(archive, file, {
+      x: form.get('x'),
+      y: form.get('y'),
+      attachedTo: form.get('attachedTo'),
+    });
     return Response.json({ item }, { status: 201 });
   } catch (error) {
     return Response.json({ error: error.message || 'upload failed.' }, { status: 400 });

@@ -59,7 +59,9 @@ Mở `http://127.0.0.1:3000/portal` để tạo một archive mới. Mỗi archi
 - editor URL riêng chứa editor key; giữ link này riêng tư
 - share URL chỉ để xem
 - password riêng cho share view; server chỉ lưu hash
-- canvas kéo-thả ảnh tự do; JPG/PNG/WebP/GIF/AVIF, tối đa 10 MB mỗi file
+- text dump viết trực tiếp trên canvas, cùng nhịp chữ với archive gốc
+- thả ảnh lên một note để ảnh nằm cạnh và đi theo note; ảnh vẫn kéo chỉnh riêng được
+- ảnh cũng có thể được thả tự do; JPG/PNG/WebP/GIF/AVIF, tối đa 10 MB mỗi file
 
 Dữ liệu demo nằm trong `.archive-data/` và bị Git ignore. Share URL local chỉ hoạt động trên chính máy đang chạy server. Trước khi gửi link qua internet hoặc deploy lên Vercel, cần thay local filesystem bằng persistent database + object storage; filesystem của serverless deployment không phải nơi lưu archive lâu dài.
 
