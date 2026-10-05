@@ -1,6 +1,5 @@
 import { cookies } from 'next/headers';
-import { hasViewerSession, readArchive, readArchiveMedia, viewerCookieName } from '../../../../../lib/archive-store';
-import { editorAccess } from '../../../../../lib/editor-access';
+import { editorCookieName, hasEditorSession, hasViewerSession, readArchive, readArchiveMedia, viewerCookieName } from '../../../../../lib/archive-store';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -13,8 +12,9 @@ export async function GET(request, { params }) {
   if (!archive) return new Response(null, { status: 404 });
 
   const cookieStore = await cookies();
+  const editorToken = cookieStore.get(editorCookieName(archiveId))?.value;
   const viewerToken = cookieStore.get(viewerCookieName(archiveId))?.value;
-  if (!(await editorAccess(archive, cookieStore)).allowed && !hasViewerSession(archiveId, viewerToken)) return new Response(null, { status: 401 });
+  if (!hasEditorSession(archive, editorToken) && !hasViewerSession(archiveId, viewerToken)) return new Response(null, { status: 401 });
 
   const data = await readArchiveMedia(archiveId, name);
   if (!data) return new Response(null, { status: 404 });

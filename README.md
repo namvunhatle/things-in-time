@@ -54,11 +54,9 @@ Mở http://127.0.0.1:3000. `npm run build` kiểm tra nội dung và build prod
 
 ## Portal và archive canvas
 
-Mở `http://127.0.0.1:3000/portal` để tạo account tối giản bằng username/password, xem dashboard và tạo archive mới. Không cần email. Password account được hash bằng scrypt; session nằm trong cookie HttpOnly 30 ngày. Đăng nhập lại sẽ thấy các draft cũ và mở editor bằng URL ổn định.
+Mở `http://127.0.0.1:3000/portal` để tạo một archive mới. Mỗi archive có:
 
-Archive cũ chưa có owner sẽ tự gắn vào account khi browser hiện tại vẫn còn editor session hợp lệ. Recovery link tiếp tục hoạt động như fallback. Mỗi archive có:
-
-- editor URL ổn định chỉ account owner hoặc recovery session mở được
+- editor URL riêng chứa editor key; giữ link này riêng tư
 - share URL chỉ để xem
 - password riêng cho share view; server chỉ lưu hash
 - text dump viết trực tiếp trên canvas, cùng nhịp chữ với archive gốc

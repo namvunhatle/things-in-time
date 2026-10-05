@@ -1,6 +1,5 @@
 import { cookies } from 'next/headers';
-import { readArchive, updateArchiveLayout } from '../../../../../lib/archive-store';
-import { editorAccess } from '../../../../../lib/editor-access';
+import { editorCookieName, hasEditorSession, readArchive, updateArchiveLayout } from '../../../../../lib/archive-store';
 import { trustedRequestBase } from '../../../../../lib/request-origin';
 
 export const runtime = 'nodejs';
@@ -13,7 +12,8 @@ export async function PUT(request, { params }) {
   if (!archive) return Response.json({ error: 'archive not found.' }, { status: 404 });
   try {
     const body = await request.json();
-    if (!(await editorAccess(archive, await cookies())).allowed) return Response.json({ error: 'editor session denied.' }, { status: 403 });
+    const editorToken = (await cookies()).get(editorCookieName(archiveId))?.value;
+    if (!hasEditorSession(archive, editorToken)) return Response.json({ error: 'editor session denied.' }, { status: 403 });
     const updated = await updateArchiveLayout(archive, body);
     return Response.json({ archive: { id: updated.id, title: updated.title, canvas: updated.canvas, items: updated.items } });
   } catch (error) {
