@@ -7,6 +7,7 @@ const itemStyle = (item, archive) => ({
   left: `${item.x / archive.canvas.width * 100}%`,
   top: `${item.y / archive.canvas.height * 100}%`,
   width: `${item.width / archive.canvas.width * 100}%`,
+  ...(item.type === 'image' ? { '--tilt': `${([...item.id].reduce((sum, character) => sum + character.charCodeAt(0), 0) % 7) - 3}deg` } : {}),
 });
 
 function dateLabel(value) {
@@ -223,7 +224,7 @@ export default function ArchiveEditor({ archive }) {
           <textarea ref={node => { if (node) noteRefs.current.set(item.id, node); else noteRefs.current.delete(item.id); }} className="note-editor" value={item.content} maxLength={10000} aria-label={`text dump from ${dateLabel(item.date)}`} placeholder="type it here. leave it rough." onChange={event => editNote(item.id, event.target.value)} onBlur={() => save(itemsRef.current)} />
           <div className="note-drop-hint">drop a photo on this entry → it’ll sit beside the writing</div>
         </div>
-      </article> : <div key={item.id} className="canvas-item" style={itemStyle(item, archive)} onPointerDown={event => beginMove(event, item)}>
+      </article> : <div key={item.id} className="canvas-item sticky-photo" style={itemStyle(item, archive)} onPointerDown={event => beginMove(event, item)}>
         <img src={imageUrl(archive.id, item.fileName)} alt={item.alt || ''} draggable="false" />
       </div>)}
     </div>

@@ -18,7 +18,7 @@ export default async function SharedArchivePage({ params }) {
   const token = (await cookies()).get(viewerCookieName(archiveId))?.value;
   if (!hasViewerSession(archiveId, token)) redirect(`/a/${archiveId}/unlock`);
 
-  return <main id="main" className="shared-archive">
+  return <main id="main" className="notebook shared-archive">
     <header className="shared-opening">
       <h1>{archive.title}</h1>
     </header>

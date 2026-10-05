@@ -1,9 +1,3 @@
-const itemStyle = (item, archive) => ({
-  left: `${item.x / archive.canvas.width * 100}%`,
-  top: `${item.y / archive.canvas.height * 100}%`,
-  width: `${item.width / archive.canvas.width * 100}%`,
-});
-
 function dateLabel(value) {
   return new Intl.DateTimeFormat('en-US', {
     month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC',
@@ -20,17 +14,39 @@ function paragraphs(content) {
   return (content || '—').split(/\n{2,}/).map((paragraph, index) => <p key={index}>{paragraph}</p>);
 }
 
+function tilt(id) {
+  const total = [...id].reduce((sum, character) => sum + character.charCodeAt(0), 0);
+  return `${(total % 7) - 3}deg`;
+}
+
 export default function ArchiveCanvasView({ archive }) {
-  return <div className="archive-canvas viewer-canvas" style={{ aspectRatio: `${archive.canvas.width} / ${archive.canvas.height}` }}>
-    {!archive.items.length && <p className="viewer-empty">nothing here yet.</p>}
-    {archive.items.map(item => item.type === 'note' ? <article key={item.id} className="canvas-note canvas-entry canvas-note-view" style={itemStyle(item, archive)}>
-      <div className="note-meta">
-        <time dateTime={`${item.date}${item.time ? `T${item.time}+07:00` : ''}`}>{dateLabel(item.date)}</time>
-        {item.time && <span>{timeLabel(item.time)}</span>}
-      </div>
-      <div className="note-content">{paragraphs(item.content)}</div>
-    </article> : <div key={item.id} className="canvas-item canvas-item-view" style={itemStyle(item, archive)}>
-      <img src={`/api/archive-media/${archive.id}/${item.fileName}`} alt={item.alt || ''} />
-    </div>)}
+  const notes = archive.items
+    .filter(item => item.type === 'note')
+    .sort((left, right) => `${right.date}T${right.time || '23:59'}`.localeCompare(`${left.date}T${left.time || '23:59'}`));
+  const images = archive.items.filter(item => item.type === 'image');
+
+  if (!notes.length && !images.length) return <p className="empty archive-feed-empty">nothing here yet.</p>;
+
+  return <div className="archive-feed-stage" style={{ minHeight: `${archive.canvas.height}px` }}>
+    <div className="archive-feed" aria-label="chronological archive entries">
+      {notes.map(note => <article className="entry" id={note.id} key={note.id} lang="en">
+        <div className="entry-date">
+          <a href={`#${note.id}`} aria-label={`entry from ${dateLabel(note.date)}`}>
+            <time dateTime={`${note.date}${note.time ? `T${note.time}+07:00` : ''}`}>{dateLabel(note.date)}</time>
+          </a>
+          {note.time && <span>{timeLabel(note.time)}</span>}
+        </div>
+        <div className="entry-body"><div className="writing">{paragraphs(note.content)}</div></div>
+      </article>)}
+    </div>
+    <div className="archive-sticky-layer" aria-label="attached photos">
+      {images.map(image => <figure
+        className="canvas-item sticky-photo sticky-photo-view"
+        key={image.id}
+        style={{ left: `${image.x}px`, top: `${image.y}px`, width: `${image.width}px`, '--tilt': tilt(image.id) }}
+      >
+        <img src={`/api/archive-media/${archive.id}/${image.fileName}`} alt={image.alt || ''} loading="lazy" decoding="async" />
+      </figure>)}
+    </div>
   </div>;
 }
