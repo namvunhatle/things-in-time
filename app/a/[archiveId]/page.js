@@ -19,11 +19,11 @@ export default async function SharedArchivePage({ params }) {
   if (!hasViewerSession(archiveId, token)) redirect(`/a/${archiveId}/unlock`);
 
   return <main id="main" className="shared-archive">
-    <header>
-      <p className="eyebrow">a private archive</p>
+    <header className="shared-opening">
       <h1>{archive.title}</h1>
     </header>
+    <nav className="shared-filter" aria-label="archive view"><span>all entries</span></nav>
     <ArchiveCanvasView archive={{ id: archive.id, canvas: archive.canvas, items: archive.items }} />
-    <footer><form action={`/api/share/${archive.id}/lock`} method="post"><button className="text-button" type="submit">close the archive</button></form></footer>
+    <footer><p>this is an archive, not an argument.</p><form action={`/api/share/${archive.id}/lock`} method="post"><button className="text-button" type="submit">close the archive</button></form></footer>
   </main>;
 }

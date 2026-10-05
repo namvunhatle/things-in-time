@@ -74,7 +74,7 @@ export default function ArchiveEditor({ archive }) {
       const response = await fetch(`/api/archives/${archive.id}/notes`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ x: 90 + count * 24, y: 90 + count * 34 }),
+        body: JSON.stringify({ x: 0, y: 62 + count * 260 }),
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || 'could not add note');
