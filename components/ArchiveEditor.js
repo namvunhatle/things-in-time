@@ -3,12 +3,14 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { DragDropProvider } from '@dnd-kit/react';
+import { Toaster, toast } from 'sonner';
 import { isSortable, useSortable } from '@dnd-kit/react/sortable';
 import EncryptedImage from './EncryptedImage';
 import { randomToken } from '../lib/archive-crypto';
 import { isImageFile, prepareImage } from '../lib/prepare-image';
 import { STACKED_QUERY, isStacked, readingOrder, sideOf } from '../lib/canvas-order';
 import { ITEM_GAP, estimateHeight, fittedCanvas, insertAtTop, lowestBottom, moveInReadingOrder, nextBeside, pushApart } from '../lib/canvas-layout';
+import { glide, measure } from '../lib/editor-motion';
 
 const IMAGE_TYPES = 'image/jpeg,image/png,image/webp,image/gif,image/avif';
 // coming back to the editor after this long starts a fresh page on a phone
@@ -38,11 +40,26 @@ function timeLabel(value) {
   return `${hour % 12 || 12}:${String(minute).padStart(2, '0')}${hour < 12 ? 'am' : 'pm'}`;
 }
 
-function newNote(y) {
-  const now = new Date();
-  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ho_Chi_Minh', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(now);
+// the date and time a note is written, in the archive's time zone
+function rightNow() {
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ho_Chi_Minh', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date());
   const value = type => parts.find(part => part.type === type)?.value;
-  return { id: randomToken(12), type: 'note', date: `${value('year')}-${value('month')}-${value('day')}`, time: `${value('hour')}:${value('minute')}`, content: '', x: 0, y, width: 728 };
+  return { date: `${value('year')}-${value('month')}-${value('day')}`, time: `${value('hour')}:${value('minute')}` };
+}
+
+function newNote(y) {
+  return { id: randomToken(12), type: 'note', ...rightNow(), content: '', x: 0, y, width: 728 };
+}
+
+// the editor speaks like a diary: today, yesterday, a weekday this week, the date before that
+// (the shared view keeps full dates: "today" means nothing to someone reading it next year)
+function friendlyDate(value) {
+  const day = iso => Math.round(Date.parse(`${iso}T00:00:00Z`) / 86_400_000);
+  const ago = day(rightNow().date) - day(value);
+  if (ago === 0) return 'today';
+  if (ago === 1) return 'yesterday';
+  if (ago > 1 && ago < 7) return new Intl.DateTimeFormat('en-US', { weekday: 'long', timeZone: 'UTC' }).format(new Date(`${value}T12:00:00Z`)).toLowerCase();
+  return dateLabel(value);
 }
 
 function youtubeVideoId(value) {
@@ -59,10 +76,11 @@ function youtubeVideoId(value) {
 }
 
 // On a phone the canvas is one column and items are reordered by long-press and drag (dnd-kit);
-// on a wider screen they are moved freely with beginMove below.
+// on a wider screen they are moved freely with beginMove below. Where dragging is off, dnd-kit
+// doesn't get the element at all: it would mark it up as a disabled button.
 function Sortable({ id, index, disabled, children }) {
   const { ref, handleRef } = useSortable({ id, index, disabled });
-  return children(ref, handleRef);
+  return disabled ? children(undefined, undefined) : children(ref, handleRef);
 }
 
 export default function ArchiveEditor({ archive, secure = null }) {
@@ -80,6 +98,11 @@ export default function ArchiveEditor({ archive, secure = null }) {
   const [draft, setDraft] = useState(null);
   const [layoutTick, setLayoutTick] = useState(0);
   const [showSubtitle, setShowSubtitle] = useState(false);
+  // a photo or video tapped or clicked, showing "remove"
+  const [selected, setSelected] = useState(null);
+  // the note whose time just got stamped, and photos and videos just put down: each plays its moment once
+  const [stamped, setStamped] = useState(null);
+  const [fresh, setFresh] = useState([]);
   // encrypted archives grow taller as they fill up; legacy ones keep the server's fixed size
   const [canvas, setCanvas] = useState(archive.canvas);
   const canvasSize = useRef(archive.canvas);
@@ -100,6 +123,16 @@ export default function ArchiveEditor({ archive, secure = null }) {
   const startWritingRef = useRef(null);
   const viewOffset = useRef(0);
   const focusDraft = useRef(false);
+  const pendingSaves = useRef(0);
+  // layout changes that should glide (FLIP, see lib/editor-motion.js) rather than jump
+  const animateNext = useRef(false);
+  const entering = useRef([]);
+  const lastRects = useRef(new Map());
+  const followCaret = useRef(null);
+  const dragStart = useRef(null);
+  const dragMoved = useRef(false);
+  // each note's last words before it was emptied, so undoing its removal brings the text back
+  const lastWords = useRef(new Map());
   // encrypted archives carry the full link, with the #secret that opens them
   const shareUrl = archive.shareUrl || (typeof window === 'undefined' ? `/a/${archive.shareSlug}` : `${window.location.origin}/a/${archive.shareSlug}`);
 
@@ -149,7 +182,10 @@ export default function ArchiveEditor({ archive, secure = null }) {
         hiddenAt = Date.now();
         flush();
       } else if (hiddenAt && Date.now() - hiddenAt > NEW_PAGE_AFTER && secure && !draftRef.current && window.scrollY < 120) {
-        changeDraft(newNote(0));
+        const page = newNote(0);
+        entering.current = [page.id];
+        animateNext.current = true;
+        changeDraft(page);
       }
     }
     document.addEventListener('visibilitychange', visibility);
@@ -159,6 +195,54 @@ export default function ArchiveEditor({ archive, secure = null }) {
       window.removeEventListener('pagehide', flush);
     };
   }, []);
+  // back online: send what couldn't be saved. Closing a tab with writing not yet saved asks first.
+  useEffect(() => {
+    function online() {
+      if (unsaved.current) saveRef.current(undefined, undefined, undefined, { quiet: true });
+    }
+    function leaving(event) {
+      if (!unsaved.current && !pendingSaves.current) return;
+      event.preventDefault();
+      event.returnValue = '';
+    }
+    window.addEventListener('online', online);
+    window.addEventListener('beforeunload', leaving);
+    return () => {
+      window.removeEventListener('online', online);
+      window.removeEventListener('beforeunload', leaving);
+    };
+  }, []);
+  // the blank page's clock runs until the first character stops it
+  useEffect(() => {
+    if (!draft) return;
+    const timer = setInterval(() => {
+      const current = draftRef.current;
+      const time = rightNow();
+      if (current && !current.content.trim() && (time.time !== current.time || time.date !== current.date)) changeDraft({ ...current, ...time });
+    }, 15_000);
+    return () => clearInterval(timer);
+  }, [draft?.id]);
+  // a selected photo or video: Escape or a click elsewhere lets go; Delete or Backspace removes it
+  useEffect(() => {
+    if (!selected) return;
+    function pointer(event) {
+      if (!event.target.closest?.(`[data-item="${selected}"]`)) setSelected(null);
+    }
+    function key(event) {
+      if (event.target.closest?.('input, textarea, select, [contenteditable]')) return;
+      if (event.key === 'Escape') setSelected(null);
+      if (event.key === 'Delete' || event.key === 'Backspace') {
+        event.preventDefault();
+        removeItems([selected]);
+      }
+    }
+    document.addEventListener('pointerdown', pointer);
+    window.addEventListener('keydown', key);
+    return () => {
+      document.removeEventListener('pointerdown', pointer);
+      window.removeEventListener('keydown', key);
+    };
+  }, [selected]);
   // N, anywhere outside a text field, starts a new page
   useEffect(() => {
     function key(event) {
@@ -196,6 +280,7 @@ export default function ArchiveEditor({ archive, secure = null }) {
       node.style.height = 'auto';
       node.style.height = `${node.scrollHeight}px`;
     }
+    keepWritingInView();
     const canvasNode = canvasRef.current;
     if (!secure || isStacked() || dragging || !canvasNode) return;
     const scale = canvasSize.current.width / canvasNode.getBoundingClientRect().width;
@@ -215,6 +300,28 @@ export default function ArchiveEditor({ archive, secure = null }) {
     for (const node of canvasNode.querySelectorAll(':scope > [data-item]')) observer.observe(node);
     return () => observer.disconnect();
   }, [items.length, draft]);
+  // after every render: if this change should glide, play it from where things were; then remember
+  // where they are now
+  useLayoutEffect(() => {
+    if (animateNext.current) glide(canvasRef.current, lastRects.current, entering.current);
+    animateNext.current = false;
+    entering.current = [];
+    lastRects.current = measure(canvasRef.current);
+  });
+
+  // Typewriter feel: while writing at the end of a note, the line being written stays at a
+  // comfortable height (just over half the screen on a desktop; clear of the keyboard on a phone),
+  // instead of creeping down to the bottom edge.
+  function keepWritingInView() {
+    const node = followCaret.current;
+    followCaret.current = null;
+    if (!node || document.activeElement !== node || node.selectionEnd !== node.value.length) return;
+    const viewport = window.visualViewport;
+    const limit = isStacked() && viewport ? viewport.offsetTop + viewport.height - 120 : window.innerHeight * 0.6;
+    const overshoot = node.getBoundingClientRect().bottom - limit;
+    // instant, like a typewriter's carriage: the page's smooth scrolling would lag behind the typing
+    if (overshoot > 0) window.scrollBy({ top: overshoot, behavior: 'instant' });
+  }
 
   function canvasPoint(clientX, clientY) {
     const rect = canvasRef.current.getBoundingClientRect();
@@ -236,7 +343,10 @@ export default function ArchiveEditor({ archive, secure = null }) {
     return itemsRef.current.length ? Math.round(lowestBottom(itemsRef.current) + ITEM_GAP) : 62;
   }
 
-  function replaceItems(updater) {
+  // A whole new list (a note added, removed, pushed, stacked) glides into place; edits in place
+  // (typing, dragging) don't.
+  function replaceItems(updater, { animate = Array.isArray(updater) } = {}) {
+    if (animate) animateNext.current = true;
     if (Array.isArray(updater)) {
       if (secure) grow(updater);
       itemsRef.current = updater;
@@ -255,6 +365,7 @@ export default function ArchiveEditor({ archive, secure = null }) {
     clearTimeout(saveTimer.current);
     unsaved.current = false;
     if (!quiet) setStatus('saving…');
+    pendingSaves.current += 1;
     const run = saveChain.current.then(async () => {
       if (secure) {
         await secure.save({ presentation: 'canvas', title: nextTitle, subtitle: nextSubtitle, canvas: grow(nextItems), items: nextItems }, { keepalive });
@@ -270,7 +381,7 @@ export default function ArchiveEditor({ archive, secure = null }) {
         unsaved.current = true;
         setStatus('couldn’t save');
       },
-    );
+    ).finally(() => { pendingSaves.current -= 1; });
     saveChain.current = run;
     return run;
   }
@@ -299,8 +410,12 @@ export default function ArchiveEditor({ archive, secure = null }) {
     const note = { ...newNote(0), id: current.id, content };
     lastNoteRef.current = note.id;
     changeDraft(null);
-    replaceItems(insertAtTop(itemsRef.current, note));
+    // nothing moves: on a phone the page is already first, on a desktop the room was already made
+    replaceItems(insertAtTop(itemsRef.current, note), { animate: false });
     scheduleSave();
+    // the clock stops: the time is stamped onto the note
+    setStamped(note.id);
+    setTimeout(() => setStamped(current => current === note.id ? null : current), 700);
   }
 
   // "write" (or N): the blank page at the top, with the caret in it. On a phone the focus has to
@@ -310,10 +425,58 @@ export default function ArchiveEditor({ archive, secure = null }) {
       addNote();
       return;
     }
-    if (!draftRef.current) flushSync(() => changeDraft(newNote(0)));
+    if (!draftRef.current) {
+      // the page turns: everything slides down and a fresh page appears on top
+      const page = newNote(0);
+      entering.current = [page.id];
+      animateNext.current = true;
+      flushSync(() => changeDraft(page));
+    }
     noteRefs.current.get(draftRef.current.id)?.focus();
   }
   startWritingRef.current = startWriting;
+
+  // Removing is safe to do on impulse: it can be undone for a few seconds. A removed note's gap
+  // closes (what was below moves up into its place); its photos and videos stay, on their own.
+  function removeItems(ids) {
+    if (!secure) return;
+    const gone = new Set(ids);
+    const before = itemsRef.current.map(item => gone.has(item.id) && item.type === 'note' && !item.content.trim() && lastWords.current.has(item.id) ? { ...item, content: lastWords.current.get(item.id) } : item);
+    const removed = before.filter(item => gone.has(item.id));
+    if (!removed.length) return;
+    const orphans = new Set(before.filter(item => gone.has(item.attachedTo) && !gone.has(item.id)).map(item => item.id));
+    let next = itemsRef.current.filter(item => !gone.has(item.id)).map(item => orphans.has(item.id) ? { ...item, attachedTo: null } : item);
+    for (const note of removed.filter(item => item.type === 'note')) {
+      const below = next.filter(item => item.y > note.y && !orphans.has(item.id));
+      if (!below.length) continue;
+      const lift = Math.min(...below.map(item => item.y)) - note.y;
+      const lifted = new Set(below.map(item => item.id));
+      next = next.map(item => lifted.has(item.id) ? { ...item, y: item.y - lift } : item);
+    }
+    replaceItems(next);
+    save(next);
+    setSelected(null);
+    const what = removed.length > 1 ? 'removed' : { note: 'entry removed', image: 'photo removed', youtube: 'video removed' }[removed[0].type];
+    toast(what, { action: { label: 'undo', onClick: () => restore(before) } });
+  }
+
+  // put things back where they were; text written since stays, anything added since stays too
+  function restore(before) {
+    const now = new Map(itemsRef.current.map(item => [item.id, item]));
+    const known = new Set(before.map(item => item.id));
+    const next = [
+      ...before.map(item => now.has(item.id) ? { ...now.get(item.id), x: item.x, y: item.y, attachedTo: item.attachedTo } : item),
+      ...itemsRef.current.filter(item => !known.has(item.id)),
+    ];
+    replaceItems(next);
+    save(next);
+  }
+
+  // a photo or video just put down plays its "placed" moment once
+  function markFresh(id) {
+    setFresh(current => [...current, id]);
+    setTimeout(() => setFresh(current => current.filter(candidate => candidate !== id)), 900);
+  }
 
   // where a photo or video added on a phone goes: beside the note being written, after any
   // already there, so it reads right after that note
@@ -377,6 +540,7 @@ export default function ArchiveEditor({ archive, secure = null }) {
           const spot = note ? nextBeside(next, note, 280, canvasSize.current.width) : { x, y };
           added = { id: randomToken(12), type: 'image', fileName, contentType: prepared.contentType, x: spot.x, y: spot.y, width: 280, alt: '', attachedTo, ...(placed ? { placed: true } : {}) };
           next = atTop ? insertAtTop(next, added) : [...next, added];
+          markFresh(added.id);
           replaceItems(next);
           await save(next);
           continue;
@@ -419,6 +583,7 @@ export default function ArchiveEditor({ archive, secure = null }) {
         // on a phone it goes with the note being written, or on top, like everything new
         const beside = isStacked() ? besideLastNote(item.width) : null;
         const next = beside ? [...itemsRef.current, { ...item, ...beside }] : isStacked() ? insertAtTop(itemsRef.current, item) : [...itemsRef.current, item];
+        markFresh(item.id);
         replaceItems(next);
         await save(next);
         setYoutubeUrl('');
@@ -481,14 +646,27 @@ export default function ArchiveEditor({ archive, secure = null }) {
     if (isStacked()) return;
     event.preventDefault();
     const point = canvasPoint(event.clientX, event.clientY);
-    // a photo or video put somewhere by hand stays there, even over a note's text (see pushApart)
-    if (item.type !== 'note' && !item.placed) replaceItems(itemsRef.current.map(candidate => candidate.id === item.id ? { ...candidate, placed: true } : candidate));
+    dragStart.current = { x: event.clientX, y: event.clientY };
+    dragMoved.current = false;
     setDragging({ id: item.id, offsetX: point.x - item.x, offsetY: point.y - item.y });
+  }
+
+  // a click that didn't turn into a drag selects a photo or video (a tap does, on a phone)
+  function select(event, item) {
+    if (!secure || dragMoved.current) return;
+    event.stopPropagation();
+    setSelected(current => current === item.id ? null : item.id);
   }
 
   useEffect(() => {
     if (!dragging) return;
     function move(event) {
+      // a few pixels of wobble is still a click
+      if (!dragMoved.current) {
+        if (Math.hypot(event.clientX - dragStart.current.x, event.clientY - dragStart.current.y) < 4) return;
+        dragMoved.current = true;
+        setSelected(null);
+      }
       const point = canvasPoint(event.clientX, event.clientY);
       replaceItems(current => {
         const moved = current.find(item => item.id === dragging.id);
@@ -498,7 +676,8 @@ export default function ArchiveEditor({ archive, secure = null }) {
         const dx = x - moved.x;
         const dy = y - moved.y;
         return current.map(item => {
-          if (item.id === moved.id) return { ...item, x, y };
+          // a photo or video put somewhere by hand stays there, even over a note's text (see pushApart)
+          if (item.id === moved.id) return { ...item, x, y, ...(item.type !== 'note' ? { placed: true } : {}) };
           if (moved.type === 'note' && item.attachedTo === moved.id) return {
             ...item,
             x: Math.max(0, Math.min(canvasSize.current.width - item.width, item.x + dx)),
@@ -510,7 +689,9 @@ export default function ArchiveEditor({ archive, secure = null }) {
     }
     function end() {
       setDragging(null);
-      requestAnimationFrame(() => save(itemsRef.current));
+      if (dragMoved.current) requestAnimationFrame(() => save(itemsRef.current));
+      // the click that ends a drag comes after this: let it see the drag, then forget it
+      setTimeout(() => { dragMoved.current = false; }, 0);
     }
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', end, { once: true });
@@ -523,7 +704,8 @@ export default function ArchiveEditor({ archive, secure = null }) {
   }, [dragging]);
 
   function editNote(id, content) {
-    replaceItems(itemsRef.current.map(item => item.id === id ? { ...item, content } : item));
+    if (content.trim()) lastWords.current.set(id, content);
+    replaceItems(itemsRef.current.map(item => item.id === id ? { ...item, content } : item), { animate: false });
     scheduleSave();
   }
 
@@ -555,6 +737,8 @@ export default function ArchiveEditor({ archive, secure = null }) {
   viewOffset.current = drawOffset;
   const view = { canvas: { width: canvas.width, height: canvas.height + drawOffset } };
   const draftTop = Math.max(0, Math.min(62, ...items.map(item => item.y)));
+  const itemState = item => `${selected === item.id ? ' is-selected' : ''}${dragging?.id === item.id ? ' is-lifted' : ''}${fresh.includes(item.id) ? ' just-placed' : ''}`;
+  const removeButton = item => selected === item.id && <button type="button" className="item-remove" onPointerDown={event => event.stopPropagation()} onClick={event => { event.stopPropagation(); removeItems([item.id]); }}>remove</button>;
   const place = item => itemStyle(item === draft ? { ...item, y: draftTop } : { ...item, y: item.y + drawOffset }, view);
 
   function reorder(event) {
@@ -566,7 +750,8 @@ export default function ArchiveEditor({ archive, secure = null }) {
     const to = Math.max(0, source.sortable.index - offset);
     if (from < 0 || from === to) return;
     const next = moveInReadingOrder(itemsRef.current, from, to);
-    replaceItems(next);
+    // dnd-kit has already animated the move
+    replaceItems(next, { animate: false });
     save(next);
   }
 
@@ -599,7 +784,7 @@ export default function ArchiveEditor({ archive, secure = null }) {
       <DragDropProvider onDragEnd={reorder}>
         {shown.map((item, index) => { const isDraft = item === draft; return <Sortable key={item.id} id={item.id} index={index} disabled={!stacked || !secure || isDraft}>{(ref, handleRef) => item.type === 'note' ? <article
           ref={ref}
-          className={`canvas-note canvas-entry${isDraft ? ' is-draft' : ''}${dropTarget === item.id ? ' is-drop-target' : ''}`}
+          className={`canvas-note canvas-entry${isDraft ? ' is-draft' : ''}${stamped === item.id ? ' just-stamped' : ''}${dragging?.id === item.id ? ' is-lifted' : ''}${dropTarget === item.id ? ' is-drop-target' : ''}`}
           style={place(item)} data-item={item.id}
           {...(isDraft ? {} : {
             onDragEnter: event => { event.preventDefault(); setDropTarget(item.id); },
@@ -609,20 +794,26 @@ export default function ArchiveEditor({ archive, secure = null }) {
           })}
         >
           <div ref={handleRef} className="note-meta" onPointerDown={event => { if (!isDraft) beginMove(event, item); }}>
-            <time dateTime={`${item.date}T${item.time}+07:00`}>{dateLabel(item.date)}</time>
+            <time dateTime={`${item.date}T${item.time}+07:00`}>{friendlyDate(item.date)}</time>
             {item.time && <span>{timeLabel(item.time)}</span>}
           </div>
           <div className="note-writing">
-            <textarea ref={node => { if (node) noteRefs.current.set(item.id, node); else noteRefs.current.delete(item.id); }} className="note-editor" rows={1} value={item.content} maxLength={10000} aria-label={isDraft ? 'new entry' : `text dump from ${dateLabel(item.date)}`} placeholder="type it here. leave it rough." onChange={event => isDraft ? writeDraft(event.target.value) : editNote(item.id, event.target.value)} onFocus={() => { lastNoteRef.current = isDraft ? null : item.id; }} onBlur={() => { if (unsaved.current) save(); }} />
+            <textarea ref={node => { if (node) noteRefs.current.set(item.id, node); else noteRefs.current.delete(item.id); }} className="note-editor" rows={1} value={item.content} maxLength={10000} aria-label={isDraft ? 'new entry' : `text dump from ${dateLabel(item.date)}`} placeholder="type it here. leave it rough." onChange={event => { followCaret.current = event.target; if (isDraft) writeDraft(event.target.value); else editNote(item.id, event.target.value); }} onKeyDown={event => { if (event.key === 'Escape') event.currentTarget.blur(); }} onFocus={() => { lastNoteRef.current = isDraft ? null : item.id; }} onBlur={() => {
+              // a note left empty goes away (undo brings it back)
+              if (!isDraft && secure && !itemsRef.current.find(candidate => candidate.id === item.id)?.content.trim()) removeItems([item.id]);
+              else if (unsaved.current) save();
+            }} />
           </div>
-        </article> : item.type === 'youtube' ? <div ref={ref} className={`canvas-item youtube-sticky side-${sideOf(item, canvas)}`} style={place(item)} data-item={item.id} onPointerDown={event => beginMove(event, item)}>
+        </article> : item.type === 'youtube' ? <div ref={ref} className={`canvas-item youtube-sticky side-${sideOf(item, canvas)}${itemState(item)}`} style={place(item)} data-item={item.id} onPointerDown={event => beginMove(event, item)} onClick={event => select(event, item)}>
+          {removeButton(item)}
           <div className="youtube-frame youtube-placeholder" aria-label="YouTube video preview">
             {item.thumbnailFileName && !secure && <img className="youtube-thumbnail" src={imageUrl(archive.id, item.thumbnailFileName)} alt="" draggable="false" />}
             {secure && <img className="youtube-thumbnail" src={`https://i.ytimg.com/vi/${item.videoId}/hqdefault.jpg`} alt="" draggable="false" referrerPolicy="no-referrer" />}
             <span className="youtube-play" aria-hidden="true">▶</span>
           </div>
           <div className="youtube-card-label"><span>{item.title || 'youtube'}</span></div>
-        </div> : <div ref={ref} className={`canvas-item sticky-photo side-${sideOf(item, canvas)}`} style={place(item)} data-item={item.id} onPointerDown={event => beginMove(event, item)}>
+        </div> : <div ref={ref} className={`canvas-item sticky-photo side-${sideOf(item, canvas)}${itemState(item)}`} style={place(item)} data-item={item.id} onPointerDown={event => beginMove(event, item)} onClick={event => select(event, item)}>
+          {removeButton(item)}
           {secure ? <EncryptedImage archiveId={archive.id} fileName={item.fileName} dataKey={secure.dataKey} contentType={item.contentType} alt={item.alt || ''} draggable="false" /> : <img src={imageUrl(archive.id, item.fileName)} alt={item.alt || ''} draggable="false" />}
         </div>}</Sortable>; })}
       </DragDropProvider>
@@ -647,5 +838,6 @@ export default function ArchiveEditor({ archive, secure = null }) {
         <button type="button" className="sheet-close" onClick={() => menuRef.current?.close()}>close</button>
       </div>
     </dialog>
+    <Toaster position="bottom-center" offset={28} mobileOffset={{ bottom: 'calc(76px + env(safe-area-inset-bottom))' }} toastOptions={{ unstyled: true, duration: 6000, classNames: { toast: 'paper-toast', content: 'paper-toast-content', actionButton: 'paper-toast-action' } }} />
   </>;
 }

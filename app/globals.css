@@ -90,7 +90,31 @@
 /* editor, any width: a note is as tall as its text and has no box around it; once something is
    being written, the rest of the page steps back. An empty subtitle stays out of the way. */
 .editor-canvas .note-editor{min-height:0}.editor-canvas .note-editor:focus-visible{outline:0}
-.editor-bar{transition:opacity .2s}.editor-canvas>.canvas-note{transition:opacity .2s,outline-color .16s}.editor-canvas>.canvas-item{transition:opacity .2s,box-shadow .15s,transform .15s}
-.editor-shell:has(.note-editor:focus:not(:placeholder-shown)) .editor-bar,.editor-canvas:has(.note-editor:focus:not(:placeholder-shown))>:not(:has(.note-editor:focus)){opacity:.3}
+.editor-bar{transition:opacity .45s ease}.editor-canvas>.canvas-note{transition:opacity .45s ease,outline-color .16s}.editor-canvas>.canvas-item{transition:opacity .45s ease,box-shadow .2s,transform .35s var(--spring)}
+/* stepping back is quick; coming back is slower, like looking up from the page */
+.editor-shell:has(.note-editor:focus:not(:placeholder-shown)) .editor-bar,.editor-canvas:has(.note-editor:focus:not(:placeholder-shown))>:not(:has(.note-editor:focus)){opacity:.3;transition-duration:.25s}
 .editor-subtitle::placeholder{color:transparent;transition:color .2s}.editor-bar:hover .editor-subtitle::placeholder,.editor-subtitle:focus::placeholder{color:var(--muted)}.editor-subtitle:placeholder-shown:not(:focus){min-height:0}
 @media(prefers-reduced-motion:reduce){.editor-bar,.editor-canvas>.canvas-note,.editor-canvas>.canvas-item,.editor-subtitle::placeholder{transition:none}}
+/* journal feel: a spring where the browser has linear() easing, a gentle curve where it doesn't */
+:root{--spring:cubic-bezier(.2,.8,.2,1)}
+@supports (transition-timing-function:linear(0,1)){:root{--spring:linear(0,.157,.438,.66,.808,.897,.948,.976,.99,.997,1)}}
+/* room below the page while writing, so the line being written can stay at eye level */
+.editor-shell:has(.note-editor:focus){padding-bottom:60vh}
+.editor-canvas .note-editor{caret-color:var(--ink)}.editor-shell ::selection{background:rgba(53,52,47,.16);color:inherit}
+/* the blank page's clock is faint; the first character stamps it onto the note */
+.editor-canvas .note-meta{transform-origin:left center;transition:opacity .3s ease}.editor-canvas .is-draft .note-meta{opacity:.45}
+.editor-canvas .just-stamped .note-meta{animation:stamp .6s var(--spring)}
+@keyframes stamp{from{opacity:.45;transform:scale(1.14)}to{opacity:1;transform:none}}
+/* a photo is put down like a polaroid on paper: a little above, square, then settled at its tilt */
+.editor-canvas .sticky-photo.just-placed{animation:place-photo .6s var(--spring) both}.editor-canvas .youtube-sticky.just-placed{animation:place-card .5s var(--spring) both}
+@keyframes place-photo{from{opacity:0;transform:translateY(-14px) rotate(0deg) scale(1.08)}to{opacity:1;transform:rotate(var(--tilt,0deg))}}
+@keyframes place-card{from{opacity:0;transform:translateY(-10px) scale(1.04)}to{opacity:1;transform:none}}
+/* picked up and put down */
+.editor-canvas .canvas-item.is-lifted{z-index:9;transform:rotate(0deg) scale(1.04);box-shadow:0 26px 50px rgba(53,52,47,.28);cursor:grabbing}.editor-canvas .canvas-note.is-lifted{opacity:.7}.editor-canvas .canvas-note.is-lifted .note-meta{cursor:grabbing}
+/* a selected photo or video, with its "remove" */
+.editor-canvas .canvas-item.is-selected{outline:1px solid var(--ink);outline-offset:5px}
+.item-remove{position:absolute;top:8px;right:8px;z-index:3;min-height:34px;padding:0 14px;border:0;background:var(--ink);color:var(--paper);font:14px/34px var(--serif);cursor:pointer;box-shadow:0 6px 16px rgba(53,52,47,.22)}
+/* the undo toast: a strip of ink */
+.paper-toast{display:flex;align-items:center;gap:20px;width:100%;padding:10px 18px;background:var(--ink);color:var(--paper);font:15px/1.4 var(--serif);box-shadow:0 14px 34px rgba(53,52,47,.22)}.paper-toast-content{flex:1}.paper-toast-action{min-height:36px;border:0;padding:0;background:transparent;color:var(--paper);font:inherit;text-decoration:underline;text-underline-offset:5px;cursor:pointer}
+@media(max-width:699px){.item-remove{min-height:42px;line-height:42px;font-size:15px}.archive-canvas>[data-dnd-dragging][data-dnd-dragging]{scale:1.03}}
+@media(prefers-reduced-motion:reduce){.editor-canvas .just-stamped .note-meta,.editor-canvas .just-placed{animation:none}.editor-canvas>.canvas-item{transition:none}}
