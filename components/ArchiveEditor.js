@@ -8,11 +8,14 @@ import EncryptedImage from './EncryptedImage';
 import { randomToken } from '../lib/archive-crypto';
 import { isImageFile, prepareImage } from '../lib/prepare-image';
 import { STACKED_QUERY, isStacked, readingOrder, sideOf } from '../lib/canvas-order';
-import { ITEM_GAP, fittedCanvas, insertAtTop, lowestBottom, moveInReadingOrder, pushApart } from '../lib/canvas-layout';
+import { ITEM_GAP, estimateHeight, fittedCanvas, insertAtTop, lowestBottom, moveInReadingOrder, nextBeside, pushApart } from '../lib/canvas-layout';
 
 const IMAGE_TYPES = 'image/jpeg,image/png,image/webp,image/gif,image/avif';
 // coming back to the editor after this long starts a fresh page on a phone
 const NEW_PAGE_AFTER = 15 * 60 * 1000;
+// on the desktop canvas the blank page needs room at the top: everything else is drawn this much
+// lower while it's there, which is exactly where the first character moves it (see insertAtTop)
+const DRAFT_SPACE = estimateHeight({ type: 'note', content: '' }) + ITEM_GAP;
 
 const imageUrl = (archiveId, fileName) => `/api/archive-media/${archiveId}/${fileName}`;
 const itemStyle = (item, archive, order = {}) => ({
@@ -72,9 +75,10 @@ export default function ArchiveEditor({ archive, secure = null }) {
   const [recoveryUrl, setRecoveryUrl] = useState('');
   const [youtubeUrl, setYoutubeUrl] = useState('');
   const [stacked, setStacked] = useState(false);
-  // on a phone, an encrypted archive opens on a blank page at the top: a note that doesn't exist
-  // until the first character is typed, so opening and closing the editor leaves nothing behind
+  // an encrypted archive opens on a blank page at the top: a note that doesn't exist until the
+  // first character is typed, so opening and closing the editor leaves nothing behind
   const [draft, setDraft] = useState(null);
+  const [layoutTick, setLayoutTick] = useState(0);
   const [showSubtitle, setShowSubtitle] = useState(false);
   // encrypted archives grow taller as they fill up; legacy ones keep the server's fixed size
   const [canvas, setCanvas] = useState(archive.canvas);
@@ -93,6 +97,9 @@ export default function ArchiveEditor({ archive, secure = null }) {
   const saveTimer = useRef(null);
   const unsaved = useRef(false);
   const saveRef = useRef(null);
+  const startWritingRef = useRef(null);
+  const viewOffset = useRef(0);
+  const focusDraft = useRef(false);
   // encrypted archives carry the full link, with the #secret that opens them
   const shareUrl = archive.shareUrl || (typeof window === 'undefined' ? `/a/${archive.shareSlug}` : `${window.location.origin}/a/${archive.shareSlug}`);
 
@@ -111,18 +118,27 @@ export default function ArchiveEditor({ archive, secure = null }) {
     return () => query.removeEventListener('change', update);
   }, []);
   useEffect(() => {
-    if (stacked && secure && !draftRef.current) changeDraft(newNote(0));
+    if (!secure || draftRef.current) return;
+    // a desktop opens with the caret on the blank page (once it's on screen, below); a phone waits
+    // for a tap, which is when the keyboard can open
+    focusDraft.current = !isStacked();
+    changeDraft(newNote(0));
   }, [stacked]);
+  useLayoutEffect(() => {
+    if (!focusDraft.current || !draft) return;
+    focusDraft.current = false;
+    noteRefs.current.get(draft.id)?.focus({ preventScroll: true });
+  }, [draft]);
   useEffect(() => {
-    // a phone gets the blank page instead
-    if (secure && isStacked()) return;
+    // encrypted archives get the blank page instead
+    if (secure) return;
     if (!itemsRef.current.length && !initialNoteRequested.current) {
       initialNoteRequested.current = true;
       addNote();
     }
   }, []);
   // never lose writing: what's pending is saved when the page is hidden (switching apps, locking
-  // the phone, closing the tab). Coming back after a while starts a fresh page on a phone.
+  // the phone, closing the tab). Coming back after a while, to the top of the page, starts a fresh one.
   useEffect(() => {
     let hiddenAt = 0;
     function flush() {
@@ -132,9 +148,8 @@ export default function ArchiveEditor({ archive, secure = null }) {
       if (document.visibilityState === 'hidden') {
         hiddenAt = Date.now();
         flush();
-      } else if (hiddenAt && Date.now() - hiddenAt > NEW_PAGE_AFTER && secure && isStacked() && !draftRef.current) {
+      } else if (hiddenAt && Date.now() - hiddenAt > NEW_PAGE_AFTER && secure && !draftRef.current && window.scrollY < 120) {
         changeDraft(newNote(0));
-        window.scrollTo(0, 0);
       }
     }
     document.addEventListener('visibilitychange', visibility);
@@ -143,6 +158,17 @@ export default function ArchiveEditor({ archive, secure = null }) {
       document.removeEventListener('visibilitychange', visibility);
       window.removeEventListener('pagehide', flush);
     };
+  }, []);
+  // N, anywhere outside a text field, starts a new page
+  useEffect(() => {
+    function key(event) {
+      if (event.key.toLowerCase() !== 'n' || event.metaKey || event.ctrlKey || event.altKey || event.isComposing) return;
+      if (event.target.closest?.('input, textarea, select, [contenteditable], dialog')) return;
+      event.preventDefault();
+      startWritingRef.current();
+    }
+    window.addEventListener('keydown', key);
+    return () => window.removeEventListener('keydown', key);
   }, []);
   useEffect(() => {
     // encrypted archives keep no recovery link on the device (see lib/key-vault.js)
@@ -162,33 +188,38 @@ export default function ArchiveEditor({ archive, secure = null }) {
     setRecoveryUrl(stored);
   }, [archive.id, archive.title]);
 
-  // notes hug their text; on the desktop canvas of an encrypted archive, a note that outgrows its
-  // space pushes what's below it down (legacy archives keep the server's fixed canvas)
-  const settledLayout = useRef(false);
+  // Notes hug their text. On the desktop canvas of an encrypted archive, everything is measured and
+  // pushApart makes room: a note's photos and videos stack beside it, and a note that outgrows its
+  // space pushes what's below it down (legacy archives keep the server's fixed canvas).
   useLayoutEffect(() => {
-    const heights = {};
-    for (const [id, node] of noteRefs.current) {
+    for (const node of noteRefs.current.values()) {
       node.style.height = 'auto';
       node.style.height = `${node.scrollHeight}px`;
-      const article = node.closest('[data-item]');
-      if (article && canvasRef.current) heights[id] = article.getBoundingClientRect().height / canvasRef.current.getBoundingClientRect().width * canvasSize.current.width;
     }
-    if (!secure || isStacked() || dragging) return;
+    const canvasNode = canvasRef.current;
+    if (!secure || isStacked() || dragging || !canvasNode) return;
+    const scale = canvasSize.current.width / canvasNode.getBoundingClientRect().width;
+    const heights = {};
+    for (const node of canvasNode.querySelectorAll(':scope > [data-item]')) heights[node.dataset.item] = node.offsetHeight * scale;
     const next = pushApart(itemsRef.current, heights);
     if (next !== itemsRef.current) {
       replaceItems(next);
-      // the first layout fixes positions estimated before anything rendered: keep them
-      if (!settledLayout.current) save(next);
+      scheduleSave();
     }
-    settledLayout.current = true;
-  }, [items, draft, dragging]);
+  }, [items, draft, dragging, layoutTick]);
+  // measure again when something changes size by itself, like a photo that finishes loading
+  useEffect(() => {
+    const canvasNode = canvasRef.current;
+    if (!canvasNode || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => setLayoutTick(tick => tick + 1));
+    for (const node of canvasNode.querySelectorAll(':scope > [data-item]')) observer.observe(node);
+    return () => observer.disconnect();
+  }, [items.length, draft]);
 
   function canvasPoint(clientX, clientY) {
     const rect = canvasRef.current.getBoundingClientRect();
-    return {
-      x: (clientX - rect.left) / rect.width * canvasSize.current.width,
-      y: (clientY - rect.top) / rect.height * canvasSize.current.height,
-    };
+    const scale = canvasSize.current.width / rect.width;
+    return { x: (clientX - rect.left) * scale, y: (clientY - rect.top) * scale - viewOffset.current };
   }
 
   function grow(nextItems) {
@@ -272,7 +303,8 @@ export default function ArchiveEditor({ archive, secure = null }) {
     scheduleSave();
   }
 
-  // "write" on a phone: the blank page at the top, keyboard up (focus has to happen inside the tap)
+  // "write" (or N): the blank page at the top, with the caret in it. On a phone the focus has to
+  // happen inside the tap, or the keyboard stays down.
   function startWriting() {
     if (!secure) {
       addNote();
@@ -281,14 +313,13 @@ export default function ArchiveEditor({ archive, secure = null }) {
     if (!draftRef.current) flushSync(() => changeDraft(newNote(0)));
     noteRefs.current.get(draftRef.current.id)?.focus();
   }
+  startWritingRef.current = startWriting;
 
   // where a photo or video added on a phone goes: beside the note being written, after any
   // already there, so it reads right after that note
   function besideLastNote(width) {
     const note = itemsRef.current.find(item => item.id === lastNoteRef.current && item.type === 'note');
-    if (!note) return null;
-    const attached = itemsRef.current.filter(item => item.attachedTo === note.id).length;
-    return { attachedTo: note.id, x: Math.min(canvasSize.current.width - width, note.x + note.width + 28), y: note.y + attached * 22 };
+    return note ? nextBeside(itemsRef.current, note, width, canvasSize.current.width) : null;
   }
 
   async function addNote() {
@@ -341,7 +372,10 @@ export default function ArchiveEditor({ archive, secure = null }) {
       if (secure) {
         try {
           const fileName = await secure.upload(prepared.blob);
-          added = { id: randomToken(12), type: 'image', fileName, contentType: prepared.contentType, x, y, width: 280, alt: '', attachedTo, ...(placed ? { placed: true } : {}) };
+          // a note's photos stack beside it, each under the last
+          const note = attachedTo && next.find(item => item.id === attachedTo);
+          const spot = note ? nextBeside(next, note, 280, canvasSize.current.width) : { x, y };
+          added = { id: randomToken(12), type: 'image', fileName, contentType: prepared.contentType, x: spot.x, y: spot.y, width: 280, alt: '', attachedTo, ...(placed ? { placed: true } : {}) };
           next = atTop ? insertAtTop(next, added) : [...next, added];
           replaceItems(next);
           await save(next);
@@ -511,10 +545,17 @@ export default function ArchiveEditor({ archive, secure = null }) {
   }
 
   const order = readingOrder(items);
-  // the phone column is in reading order in the DOM itself, so dnd-kit can reorder it; the blank
-  // page, when there is one, sits above everything and doesn't move
+  // Phone: the column is in reading order in the DOM itself, so dnd-kit can reorder it, and the
+  // blank page comes first. Desktop: positions place everything, and the blank page comes last in
+  // the DOM, where its note lands in the items (insertAtTop appends), so it stays the same textarea.
   const sorted = stacked ? [...items].sort((a, b) => order[a.id] - order[b.id]) : items;
-  const shown = stacked && draft ? [draft, ...sorted] : sorted;
+  const shown = !draft ? sorted : stacked ? [draft, ...sorted] : [...sorted, draft];
+  // desktop: while the blank page is there, everything else is drawn DRAFT_SPACE lower
+  const drawOffset = draft && !stacked ? DRAFT_SPACE : 0;
+  viewOffset.current = drawOffset;
+  const view = { canvas: { width: canvas.width, height: canvas.height + drawOffset } };
+  const draftTop = Math.max(0, Math.min(62, ...items.map(item => item.y)));
+  const place = item => itemStyle(item === draft ? { ...item, y: draftTop } : { ...item, y: item.y + drawOffset }, view);
 
   function reorder(event) {
     if (event.canceled) return;
@@ -532,13 +573,12 @@ export default function ArchiveEditor({ archive, secure = null }) {
   return <>
     <header className={`editor-bar${showSubtitle ? ' show-subtitle' : ''}`}>
       <div>
-        <p className="eyebrow">editor</p>
         <textarea className="editor-title" rows={1} value={title} maxLength={80} aria-label="archive name" onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); event.currentTarget.blur(); } }} onChange={event => { titleRef.current = event.target.value; setTitle(event.target.value); scheduleSave(); }} onBlur={() => { if (unsaved.current) save(); }} />
         <textarea ref={subtitleField} className="editor-subtitle" value={subtitle} maxLength={400} aria-label="archive subtitle" placeholder="subtitle" onChange={event => { subtitleRef.current = event.target.value; setSubtitle(event.target.value); scheduleSave(); }} onBlur={() => { if (unsaved.current) save(); }} />
       </div>
       <div className="editor-actions">
         <div className="editor-create-actions">
-          <button type="button" onClick={addNote}>+ text</button>
+          <button type="button" onClick={startWriting} title="new page (N)">write</button>
           <label className="editor-upload">+ photo<input type="file" accept={IMAGE_TYPES} multiple onChange={choosePhotos} /></label>
           <details className="editor-video-add">
             <summary>+ video</summary>
@@ -555,32 +595,34 @@ export default function ArchiveEditor({ archive, secure = null }) {
         {status && <span className="editor-status" role="status">{status}</span>}
       </div>
     </header>
-    <div ref={canvasRef} className={`archive-canvas editor-canvas${dragging ? ' is-dragging' : ''}`} style={{ aspectRatio: `${canvas.width} / ${canvas.height}` }} onDragOver={event => event.preventDefault()} onDrop={dropOnCanvas}>
+    <div ref={canvasRef} className={`archive-canvas editor-canvas${dragging ? ' is-dragging' : ''}`} style={{ aspectRatio: `${view.canvas.width} / ${view.canvas.height}` }} onDragOver={event => event.preventDefault()} onDrop={dropOnCanvas}>
       <DragDropProvider onDragEnd={reorder}>
         {shown.map((item, index) => { const isDraft = item === draft; return <Sortable key={item.id} id={item.id} index={index} disabled={!stacked || !secure || isDraft}>{(ref, handleRef) => item.type === 'note' ? <article
           ref={ref}
           className={`canvas-note canvas-entry${isDraft ? ' is-draft' : ''}${dropTarget === item.id ? ' is-drop-target' : ''}`}
-          style={itemStyle(item, { canvas })} data-item={item.id}
-          onDragEnter={event => { event.preventDefault(); setDropTarget(item.id); }}
-          onDragOver={event => event.preventDefault()}
-          onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget)) setDropTarget(null); }}
-          onDrop={event => dropOnNote(event, item)}
+          style={place(item)} data-item={item.id}
+          {...(isDraft ? {} : {
+            onDragEnter: event => { event.preventDefault(); setDropTarget(item.id); },
+            onDragOver: event => event.preventDefault(),
+            onDragLeave: event => { if (!event.currentTarget.contains(event.relatedTarget)) setDropTarget(null); },
+            onDrop: event => dropOnNote(event, item),
+          })}
         >
-          <div ref={handleRef} className="note-meta" onPointerDown={event => beginMove(event, item)}>
+          <div ref={handleRef} className="note-meta" onPointerDown={event => { if (!isDraft) beginMove(event, item); }}>
             <time dateTime={`${item.date}T${item.time}+07:00`}>{dateLabel(item.date)}</time>
             {item.time && <span>{timeLabel(item.time)}</span>}
           </div>
           <div className="note-writing">
             <textarea ref={node => { if (node) noteRefs.current.set(item.id, node); else noteRefs.current.delete(item.id); }} className="note-editor" rows={1} value={item.content} maxLength={10000} aria-label={isDraft ? 'new entry' : `text dump from ${dateLabel(item.date)}`} placeholder="type it here. leave it rough." onChange={event => isDraft ? writeDraft(event.target.value) : editNote(item.id, event.target.value)} onFocus={() => { lastNoteRef.current = isDraft ? null : item.id; }} onBlur={() => { if (unsaved.current) save(); }} />
           </div>
-        </article> : item.type === 'youtube' ? <div ref={ref} className={`canvas-item youtube-sticky side-${sideOf(item, canvas)}`} style={itemStyle(item, { canvas })} data-item={item.id} onPointerDown={event => beginMove(event, item)}>
+        </article> : item.type === 'youtube' ? <div ref={ref} className={`canvas-item youtube-sticky side-${sideOf(item, canvas)}`} style={place(item)} data-item={item.id} onPointerDown={event => beginMove(event, item)}>
           <div className="youtube-frame youtube-placeholder" aria-label="YouTube video preview">
             {item.thumbnailFileName && !secure && <img className="youtube-thumbnail" src={imageUrl(archive.id, item.thumbnailFileName)} alt="" draggable="false" />}
             {secure && <img className="youtube-thumbnail" src={`https://i.ytimg.com/vi/${item.videoId}/hqdefault.jpg`} alt="" draggable="false" referrerPolicy="no-referrer" />}
             <span className="youtube-play" aria-hidden="true">▶</span>
           </div>
           <div className="youtube-card-label"><span>{item.title || 'youtube'}</span></div>
-        </div> : <div ref={ref} className={`canvas-item sticky-photo side-${sideOf(item, canvas)}`} style={itemStyle(item, { canvas })} data-item={item.id} onPointerDown={event => beginMove(event, item)}>
+        </div> : <div ref={ref} className={`canvas-item sticky-photo side-${sideOf(item, canvas)}`} style={place(item)} data-item={item.id} onPointerDown={event => beginMove(event, item)}>
           {secure ? <EncryptedImage archiveId={archive.id} fileName={item.fileName} dataKey={secure.dataKey} contentType={item.contentType} alt={item.alt || ''} draggable="false" /> : <img src={imageUrl(archive.id, item.fileName)} alt={item.alt || ''} draggable="false" />}
         </div>}</Sortable>; })}
       </DragDropProvider>
