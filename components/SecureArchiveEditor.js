@@ -83,7 +83,7 @@ function ViewerPasswordReset({ archive }) {
       const result = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(result.error || 'couldn’t change the password.');
       event.target.reset();
-      setMessage('password changed. the share link stays the same; the old password no longer works.');
+      setMessage('password changed. the view link stays the same; the old password no longer works.');
     } catch (error) {
       setMessage(error.message || 'couldn’t change the password.');
     } finally {

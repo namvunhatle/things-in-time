@@ -372,21 +372,14 @@ export default function ArchiveEditor({ archive, secure = null }) {
     setStatus('unsaved');
   }
 
-  async function copyShareLink() {
+  // legacy archives have a recovery link that opens the editor by itself; an encrypted archive's
+  // editor link asks for the recovery key on any browser that doesn't hold the archive's key
+  async function copyEditorLink() {
     try {
-      await navigator.clipboard.writeText(shareUrl);
-      setStatus('share link copied');
+      await navigator.clipboard.writeText(recoveryUrl || `${window.location.origin}/portal/${archive.id}`);
+      setStatus(secure ? 'editor link copied. other browsers will ask for your recovery key.' : 'editor link copied');
     } catch {
-      setStatus('copy failed — open the view and copy its URL');
-    }
-  }
-
-  async function copyRecoveryLink() {
-    try {
-      await navigator.clipboard.writeText(recoveryUrl);
-      setStatus('editor recovery link copied');
-    } catch {
-      setStatus('couldn’t copy recovery link');
+      setStatus('couldn’t copy the editor link');
     }
   }
 
@@ -423,9 +416,8 @@ export default function ArchiveEditor({ archive, secure = null }) {
           </details>
         </div>
         <div className="editor-link-actions">
-          {recoveryUrl && <button type="button" onClick={copyRecoveryLink}>editor link</button>}
-          <button type="button" onClick={copyShareLink}>share link</button>
-          <a href={shareUrl} target="_blank" rel="noreferrer">view ↗</a>
+          <button type="button" onClick={copyEditorLink}>copy editor link</button>
+          <a href={shareUrl} target="_blank" rel="noreferrer">view link ↗</a>
         </div>
         {status && <span className="editor-status" role="status">{status}</span>}
       </div>

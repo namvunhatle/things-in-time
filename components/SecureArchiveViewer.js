@@ -82,7 +82,7 @@ export default function SecureArchiveViewer({ gate }) {
     <p className="eyebrow">an encrypted archive</p>
     <h1>this link is incomplete.</h1>
     <p>ask the person who shared it for the full link. the part after # opens the archive and never reaches our server.</p>
-    <p>{ownsArchive ? 'this browser’s key no longer matches. open the editor with your recovery key, then copy the share link there.' : 'if this is your archive, open your editor and copy the share link from there.'} <a href={`/portal/${gate.id}`}>open the editor</a></p>
+    <p>{ownsArchive ? 'this browser’s key no longer matches. open the editor with your recovery key, then use “view link” there.' : 'if this is your archive, open your editor and use “view link” there.'} <a href={`/portal/${gate.id}`}>open the editor</a></p>
   </main>;
 
   if (!opened) return <main id="main" className="gate">

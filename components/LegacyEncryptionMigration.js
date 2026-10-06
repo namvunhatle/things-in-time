@@ -66,7 +66,7 @@ export default function LegacyEncryptionMigration({ archive, document }) {
     <p className="eyebrow">zero-access encryption is on</p>
     <h2>save your new recovery key.</h2>
     <p>this is the only way back into the editor. we cannot recover it.</p>
-    <p>your share link has changed: old links stop working. copy the new one from the editor.</p>
+    <p>your view link has changed: old links stop working. open the new one with “view link” in the editor.</p>
     <output className="recovery-key">{result.recoveryKey}</output>
     <button type="button" onClick={copyKey}>copy recovery key</button>
     <label className="recovery-confirm"><input type="checkbox" checked={saved} onChange={event => setSaved(event.target.checked)} /> i saved it somewhere safe</label>

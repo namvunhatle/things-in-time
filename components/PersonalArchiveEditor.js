@@ -168,9 +168,8 @@ export default function PersonalArchiveEditor({ archive, entries: initialEntries
       <textarea className="editor-title" rows={1} value={title} maxLength={80} aria-label="archive title" onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); event.currentTarget.blur(); } }} onChange={event => { setTitle(event.target.value); setStatus('unsaved'); }} onBlur={saveSettings} />
       <textarea className="editor-subtitle" value={subtitle} maxLength={400} aria-label="archive subtitle" placeholder="subtitle" onChange={event => { setSubtitle(event.target.value); setStatus('unsaved'); }} onBlur={saveSettings} />
       <div className="personal-editor-actions">
-        {recoveryUrl && <button type="button" onClick={() => copy(recoveryUrl, 'editor link copied')}>editor link</button>}
-        <button type="button" onClick={() => copy(shareUrl, 'share link copied')}>share link</button>
-        <a href={shareUrl} target="_blank" rel="noreferrer">view ↗</a>
+        <button type="button" onClick={() => copy(recoveryUrl || `${window.location.origin}/portal/${archive.id}`, 'editor link copied')}>copy editor link</button>
+        <a href={shareUrl} target="_blank" rel="noreferrer">view link ↗</a>
         {status && <span role="status">{status}</span>}
       </div>
     </header>
