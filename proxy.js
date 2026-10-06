@@ -23,7 +23,7 @@ export function proxy(request) {
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set('x-nonce', nonce);
   requestHeaders.set('Content-Security-Policy', contentSecurityPolicy);
-  const publicPath = path.startsWith('/_next/static/') || path.startsWith('/_next/webpack-hmr') ||
+  const publicPath = path.startsWith('/_next/static/') || path.startsWith('/_vercel/') || path.startsWith('/_next/webpack-hmr') ||
     path === '/' || path === '/portal' || path.startsWith('/portal/') || path.startsWith('/a/') ||
     path === '/api/archives' || path.startsWith('/api/archives/') ||
     path.startsWith('/api/archive-media/') || path.startsWith('/api/share/') ||

@@ -1,5 +1,6 @@
 import './globals.css';
 import { connection } from 'next/server';
+import SiteAnalytics from '../components/SiteAnalytics';
 
 export const metadata = {
   title: 'things i couldn’t say in time',
@@ -11,5 +12,5 @@ export const viewport = { width: 'device-width', initialScale: 1, themeColor: '#
 
 export default async function RootLayout({ children }) {
   await connection();
-  return <html lang="en"><body><a className="skip-link" href="#main">skip to content</a>{children}</body></html>;
+  return <html lang="en"><body><a className="skip-link" href="#main">skip to content</a>{children}<SiteAnalytics /></body></html>;
 }
