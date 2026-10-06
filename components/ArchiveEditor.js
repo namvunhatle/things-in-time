@@ -1,11 +1,11 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import EncryptedImage from './EncryptedImage';
 import { randomToken } from '../lib/archive-crypto';
 import { isImageFile, prepareImage } from '../lib/prepare-image';
 import { isStacked, readingOrder, sideOf } from '../lib/canvas-order';
-import { ITEM_GAP, fittedCanvas, lowestBottom } from '../lib/canvas-layout';
+import { ITEM_GAP, fittedCanvas, lowestBottom, pushApart } from '../lib/canvas-layout';
 
 const imageUrl = (archiveId, fileName) => `/api/archive-media/${archiveId}/${fileName}`;
 const itemStyle = (item, archive, order = {}) => ({
@@ -91,6 +91,27 @@ export default function ArchiveEditor({ archive, secure = null }) {
     }
     setRecoveryUrl(stored);
   }, [archive.id, archive.title]);
+
+  // notes hug their text; on the desktop canvas of an encrypted archive, a note that outgrows its
+  // space pushes what's below it down (legacy archives keep the server's fixed canvas)
+  const settledLayout = useRef(false);
+  useLayoutEffect(() => {
+    const heights = {};
+    for (const [id, node] of noteRefs.current) {
+      node.style.height = 'auto';
+      node.style.height = `${node.scrollHeight}px`;
+      const article = node.closest('[data-item]');
+      if (article && canvasRef.current) heights[id] = article.getBoundingClientRect().height / canvasRef.current.getBoundingClientRect().width * canvasSize.current.width;
+    }
+    if (!secure || isStacked() || dragging) return;
+    const next = pushApart(itemsRef.current, heights);
+    if (next !== itemsRef.current) {
+      replaceItems(next);
+      // the first layout fixes positions estimated before anything rendered: keep them
+      if (!settledLayout.current) save(next);
+    }
+    settledLayout.current = true;
+  }, [items, dragging]);
 
   function canvasPoint(clientX, clientY) {
     const rect = canvasRef.current.getBoundingClientRect();

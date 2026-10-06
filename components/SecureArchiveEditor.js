@@ -125,17 +125,16 @@ export default function SecureArchiveEditor({ archive }) {
         if (active) setError('this browser’s key could not open the archive. open it again with your recovery key.');
         return;
       }
-      let converted = false;
       // the first archive was a timeline with its own form editor: move it onto the canvas once,
       // here in the browser, since only the browser can decrypt it. If this save fails, the next
       // edit saves the converted document anyway (secure.save spreads it), so open it regardless.
       if (document.presentation === 'timeline') {
         document = timelineToCanvas(document);
-        converted = await saveDocument(archive.id, dataKey, document).then(() => true, () => 'unsaved');
+        await saveDocument(archive.id, dataKey, document).catch(() => {});
       }
       const shareUrl = `${window.location.origin}/a/${archive.shareSlug}#${linkSecret}`;
       rememberArchive({ id: archive.id, shareSlug: archive.shareSlug, title: document.title });
-      if (active) setOpened({ dataKey, document, shareUrl, converted });
+      if (active) setOpened({ dataKey, document, shareUrl });
     }
     open();
     return () => { active = false; };
@@ -163,7 +162,6 @@ export default function SecureArchiveEditor({ archive }) {
   const legacyEntries = opened.document.legacyTimeline?.entries || [];
   return <>
     {archive.plaintextCleanupPending && <PlaintextCleanup archiveId={archive.id} entryCount={legacyEntries.length} />}
-    {opened.converted && <section className="migration-card" role="status"><p>this archive now uses the canvas editor. your {legacyEntries.length} entries are notes, newest at the top. the original entries are kept, encrypted, inside the archive.{opened.converted === 'unsaved' && ' it isn’t saved yet: your next edit saves it.'}</p></section>}
     <ArchiveEditor archive={identity} secure={secure} />
     <ViewerPasswordReset archive={archive} />
   </>;
