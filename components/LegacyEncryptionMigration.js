@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { createSecureArchive } from '../lib/archive-crypto';
+import { rememberArchive, saveArchiveKey } from '../lib/key-vault';
 
 export default function LegacyEncryptionMigration({ archive, document }) {
   const [open, setOpen] = useState(false);
@@ -34,9 +35,17 @@ export default function LegacyEncryptionMigration({ archive, document }) {
       });
       const responseBody = await response.json();
       if (!response.ok) throw new Error(responseBody.error || 'encryption failed');
-      const editorUrl = `${window.location.origin}/portal/${archive.id}/claim#key=${encodeURIComponent(encrypted.recoveryKey)}`;
-      localStorage.setItem(`archive_recovery_${archive.id}`, editorUrl);
-      setResult({ recoveryKey: encrypted.recoveryKey, editorUrl, cleanupPending: responseBody.cleanupPending });
+      // the old editor session was bound to the old editor key: sign in again with the new one,
+      // and keep the data key on this device. The recovery key is shown once and stored nowhere.
+      const session = await fetch(`/api/archives/${archive.id}/editor-session`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: encrypted.editorAuth }),
+      });
+      if (!session.ok) throw new Error('encrypted, but this browser couldn’t sign in. use your recovery key.');
+      await saveArchiveKey(archive.id, encrypted.dataKey);
+      rememberArchive({ id: archive.id, shareSlug: archive.shareSlug, title: document.title });
+      setResult({ recoveryKey: encrypted.recoveryKey, editorUrl: `/portal/${archive.id}`, cleanupPending: responseBody.cleanupPending });
     } catch (migrationError) {
       setError(migrationError.message || 'encryption failed');
     } finally {
@@ -57,6 +66,7 @@ export default function LegacyEncryptionMigration({ archive, document }) {
     <p className="eyebrow">zero-access encryption is on</p>
     <h2>save your new recovery key.</h2>
     <p>this is the only way back into the editor. we cannot recover it.</p>
+    <p>your share link has changed: old links stop working. copy the new one from the editor.</p>
     <output className="recovery-key">{result.recoveryKey}</output>
     <button type="button" onClick={copyKey}>copy recovery key</button>
     <label className="recovery-confirm"><input type="checkbox" checked={saved} onChange={event => setSaved(event.target.checked)} /> i saved it somewhere safe</label>

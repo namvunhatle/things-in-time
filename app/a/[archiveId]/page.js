@@ -2,7 +2,7 @@ import { cookies } from 'next/headers';
 import { notFound, redirect } from 'next/navigation';
 import ArchiveCanvasView from '../../../components/ArchiveCanvasView';
 import SecureArchiveViewer from '../../../components/SecureArchiveViewer';
-import { encryptedArchiveClientView, hasViewerSession, readArchive, viewerCookieName } from '../../../lib/archive-store';
+import { encryptedArchiveViewerGate, hasViewerSession, readArchive, viewerCookieName } from '../../../lib/archive-store';
 import Entry from '../../../components/Entry';
 import { categories, readEntries } from '../../../lib/entries';
 
@@ -18,7 +18,7 @@ export default async function SharedArchivePage({ params, searchParams }) {
   const { archiveId } = await params;
   const archive = await readArchive(archiveId);
   if (!archive) notFound();
-  if (archive.version === 2) return <SecureArchiveViewer archive={encryptedArchiveClientView(archive)} />;
+  if (archive.version === 2) return <SecureArchiveViewer gate={encryptedArchiveViewerGate(archive)} />;
   const token = (await cookies()).get(viewerCookieName(archiveId))?.value;
   if (!hasViewerSession(archiveId, token)) redirect(`/a/${archiveId}/unlock`);
 

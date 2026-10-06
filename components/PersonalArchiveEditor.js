@@ -85,14 +85,17 @@ export default function PersonalArchiveEditor({ archive, entries: initialEntries
   const [entries, setEntries] = useState(initialEntries);
   const [status, setStatus] = useState('');
   const [recoveryUrl, setRecoveryUrl] = useState('');
-  const shareUrl = typeof window === 'undefined' ? `/a/${archive.shareSlug}` : `${window.location.origin}/a/${archive.shareSlug}`;
+  // encrypted archives carry the full link, with the #secret that opens them
+  const shareUrl = archive.shareUrl || (typeof window === 'undefined' ? `/a/${archive.shareSlug}` : `${window.location.origin}/a/${archive.shareSlug}`);
 
   useEffect(() => {
+    // encrypted archives keep no recovery link on the device (see lib/key-vault.js)
+    if (secure) return;
     const key = `archive_recovery_${archive.id}`;
     const stored = localStorage.getItem(key) || sessionStorage.getItem(key) || '';
     if (stored) localStorage.setItem(key, stored);
     setRecoveryUrl(stored);
-  }, [archive.id]);
+  }, [archive.id, secure]);
 
   async function saveSettings() {
     setStatus('saving…');
@@ -167,7 +170,7 @@ export default function PersonalArchiveEditor({ archive, entries: initialEntries
       <div className="personal-editor-actions">
         {recoveryUrl && <button type="button" onClick={() => copy(recoveryUrl, 'editor link copied')}>editor link</button>}
         <button type="button" onClick={() => copy(shareUrl, 'share link copied')}>share link</button>
-        <a href={`/a/${archive.shareSlug}`} target="_blank" rel="noreferrer">view ↗</a>
+        <a href={shareUrl} target="_blank" rel="noreferrer">view ↗</a>
         {status && <span role="status">{status}</span>}
       </div>
     </header>

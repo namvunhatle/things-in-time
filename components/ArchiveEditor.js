@@ -57,7 +57,8 @@ export default function ArchiveEditor({ archive, secure = null }) {
   const itemsRef = useRef(items);
   const noteRefs = useRef(new Map());
   const initialNoteRequested = useRef(false);
-  const shareUrl = typeof window === 'undefined' ? `/a/${archive.shareSlug}` : `${window.location.origin}/a/${archive.shareSlug}`;
+  // encrypted archives carry the full link, with the #secret that opens them
+  const shareUrl = archive.shareUrl || (typeof window === 'undefined' ? `/a/${archive.shareSlug}` : `${window.location.origin}/a/${archive.shareSlug}`);
 
   useEffect(() => { itemsRef.current = items; }, [items]);
   useEffect(() => {
@@ -67,6 +68,8 @@ export default function ArchiveEditor({ archive, secure = null }) {
     }
   }, []);
   useEffect(() => {
+    // encrypted archives keep no recovery link on the device (see lib/key-vault.js)
+    if (secure) return;
     const key = `archive_recovery_${archive.id}`;
     const stored = localStorage.getItem(key) || sessionStorage.getItem(key) || '';
     if (stored) {
@@ -326,7 +329,7 @@ export default function ArchiveEditor({ archive, secure = null }) {
         <div className="editor-link-actions">
           {recoveryUrl && <button type="button" onClick={copyRecoveryLink}>editor link</button>}
           <button type="button" onClick={copyShareLink}>share link</button>
-          <a href={`/a/${archive.shareSlug}`} target="_blank" rel="noreferrer">view ↗</a>
+          <a href={shareUrl} target="_blank" rel="noreferrer">view ↗</a>
         </div>
         {status && <span className="editor-status" role="status">{status}</span>}
       </div>

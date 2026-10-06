@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { createSecureArchive } from '../lib/archive-crypto';
+import { rememberArchive, saveArchiveKey } from '../lib/key-vault';
 
 export default function PortalCreateForm() {
   const [error, setError] = useState('');
@@ -20,8 +21,7 @@ export default function PortalCreateForm() {
 
   function openEditor() {
     if (!created || !saved) return;
-    localStorage.setItem(`archive_recovery_${created.id}`, created.editorUrl);
-    window.location.assign(created.editorUrl);
+    window.location.assign(`/portal/${created.id}`);
   }
 
   async function submit(event) {
@@ -45,8 +45,17 @@ export default function PortalCreateForm() {
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || 'couldn’t create the archive.');
-      const editorUrl = `${window.location.origin}/portal/${result.id}/claim#key=${encodeURIComponent(encrypted.recoveryKey)}`;
-      setCreated({ id: result.id, recoveryKey: encrypted.recoveryKey, editorUrl });
+      // sign this browser in as the editor and keep the data key here (non-extractable);
+      // the recovery key is shown once below and stored nowhere
+      const session = await fetch(`/api/archives/${result.id}/editor-session`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: encrypted.editorAuth }),
+      });
+      if (!session.ok) throw new Error('the archive was created, but this browser couldn’t sign in. use your recovery key.');
+      await saveArchiveKey(result.id, encrypted.dataKey);
+      rememberArchive({ id: result.id, shareSlug: result.shareSlug, title });
+      setCreated({ id: result.id, recoveryKey: encrypted.recoveryKey });
     } catch (requestError) {
       setError(requestError.message);
       setBusy(false);

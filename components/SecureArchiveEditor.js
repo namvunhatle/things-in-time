@@ -3,20 +3,12 @@
 import { useEffect, useState } from 'react';
 import ArchiveEditor from './ArchiveEditor';
 import PersonalArchiveEditor from './PersonalArchiveEditor';
-import { createEncryptedMedia, encryptDocument, unlockWithRecovery } from '../lib/archive-crypto';
+import { createEncryptedMedia, decryptDocument, decryptLinkSecret, encryptDocument } from '../lib/archive-crypto';
+import { loadArchiveKey, rememberArchive } from '../lib/key-vault';
 
 const categories = {
   all: 'all', understood: 'things i understood too late', miss: 'things i miss', songs: 'songs', home: 'our home', unsaid: 'things i never said',
 };
-
-function recoveryKeyFromStoredUrl(archiveId) {
-  const stored = localStorage.getItem(`archive_recovery_${archiveId}`) || sessionStorage.getItem(`archive_recovery_${archiveId}`) || '';
-  try {
-    return new URLSearchParams(new URL(stored).hash.slice(1)).get('key') || '';
-  } catch {
-    return '';
-  }
-}
 
 export default function SecureArchiveEditor({ archive }) {
   const [opened, setOpened] = useState(null);
@@ -25,16 +17,20 @@ export default function SecureArchiveEditor({ archive }) {
   useEffect(() => {
     let active = true;
     async function open() {
-      const recoveryKey = recoveryKeyFromStoredUrl(archive.id);
-      if (!recoveryKey) {
-        setError('open your recovery link in this browser.');
+      const dataKey = await loadArchiveKey(archive.id);
+      if (!dataKey) {
+        // signed in, but this browser has never held the key: ask for the recovery key
+        window.location.replace(`/portal/${archive.id}/claim`);
         return;
       }
       try {
-        const result = await unlockWithRecovery(archive, recoveryKey);
-        if (active) setOpened({ ...result, recoveryKey });
+        const document = await decryptDocument(archive.id, dataKey, archive.crypto.document);
+        const linkSecret = await decryptLinkSecret(archive.id, dataKey, archive.crypto.linkSecretWrap);
+        const shareUrl = `${window.location.origin}/a/${archive.shareSlug}#${linkSecret}`;
+        rememberArchive({ id: archive.id, shareSlug: archive.shareSlug, title: document.title });
+        if (active) setOpened({ dataKey, document, shareUrl });
       } catch {
-        if (active) setError('that recovery key could not open this archive.');
+        if (active) setError('this browser’s key could not open the archive. open it again with your recovery key.');
       }
     }
     open();
@@ -64,7 +60,7 @@ export default function SecureArchiveEditor({ archive }) {
       return encrypted.fileName;
     },
   };
-  const identity = { id: archive.id, shareSlug: archive.shareSlug, ...opened.document };
+  const identity = { id: archive.id, shareSlug: archive.shareSlug, shareUrl: opened.shareUrl, ...opened.document };
   if (opened.document.presentation === 'timeline') {
     return <PersonalArchiveEditor archive={identity} entries={opened.document.entries || []} categories={categories} secure={secure} />;
   }

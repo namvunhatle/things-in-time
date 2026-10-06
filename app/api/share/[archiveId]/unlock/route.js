@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { archiveSessionSeconds, createViewerSession, readArchive, verifyArchivePassword, viewerCookieName } from '../../../../../lib/archive-store';
+import { archiveSessionSeconds, createViewerSession, encryptedArchiveViewerPayload, readArchive, verifyArchivePassword, viewerCookieName } from '../../../../../lib/archive-store';
 import { trustedRequestBase } from '../../../../../lib/request-origin';
 import { withinRateLimit } from '../../../../../lib/rate-limit';
 
@@ -14,6 +14,9 @@ export async function POST(request, { params }) {
   const { archiveId } = await params;
   const archive = await readArchive(archiveId);
   if (!archive) return new NextResponse(null, { status: 404 });
+  // Holding the link is enough to guess passwords online, from any number of IPs: cap the
+  // guesses per archive as well as per client.
+  if (!await withinRateLimit(request, 'viewer-unlock-archive', 60, 60 * 60, archive.id)) return NextResponse.json({ error: 'too many attempts. try again later.' }, { status: 429 });
   let credential;
   if (archive.version === 2) {
     const body = await request.json().catch(() => ({}));
@@ -28,9 +31,13 @@ export async function POST(request, { params }) {
     return NextResponse.redirect(new URL(`/a/${archiveId}/unlock?error=1`, base), 303);
   }
   const destination = `/a/${archiveId}`;
-  const response = wantsJson
-    ? NextResponse.json({ ok: true, redirect: destination })
-    : NextResponse.redirect(new URL(destination, base), 303);
+  // Encrypted archives: the wrapped key and document leave the server only after the auth
+  // secret matched.
+  const response = archive.version === 2
+    ? NextResponse.json({ ok: true, archive: encryptedArchiveViewerPayload(archive) })
+    : wantsJson
+      ? NextResponse.json({ ok: true, redirect: destination })
+      : NextResponse.redirect(new URL(destination, base), 303);
   response.cookies.set(viewerCookieName(archiveId), createViewerSession(archiveId), {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',

@@ -14,7 +14,9 @@ export async function POST(request, { params }) {
   if (!archive) return Response.json({ error: 'archive not found.' }, { status: 404 });
   const body = await request.json();
   if (!verifyEditorKey(archive, body.key)) return Response.json({ error: 'editor access denied.' }, { status: 403 });
-  const response = NextResponse.json({ ok: true });
+  // Encrypted archives: hand back the recovery-wrapped key so this browser can unwrap it with the
+  // recovery key it already holds. Useless without that key.
+  const response = NextResponse.json(archive.version === 2 ? { ok: true, recoveryWrap: archive.crypto.recoveryWrap } : { ok: true });
   response.cookies.set(editorCookieName(archiveId), createEditorSession(archive), {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',

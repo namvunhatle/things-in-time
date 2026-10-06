@@ -10,6 +10,8 @@ export default function RecentArchives() {
       const saved = JSON.parse(localStorage.getItem('archive_recent') || '[]');
       const valid = saved.filter(item => {
         if (!/^[a-zA-Z0-9_-]{16,64}$/.test(item.id || '')) return false;
+        // encrypted archives open with the key kept on this device, no link needed
+        if (item.encrypted) return true;
         const url = new URL(item.recoveryUrl, window.location.origin);
         return url.origin === window.location.origin && url.pathname === `/portal/${item.id}/claim` && url.hash.startsWith('#key=');
       });
@@ -24,7 +26,7 @@ export default function RecentArchives() {
     <p className="eyebrow">saved on this browser</p>
     <ul>{archives.map(archive => <li key={archive.id}>
       <span>{archive.title || 'untitled archive'}</span>
-      <div><a href={archive.recoveryUrl}>continue editing</a><a href={`/a/${archive.shareSlug || archive.id}`} target="_blank" rel="noreferrer">view ↗</a></div>
+      <div><a href={archive.encrypted ? `/portal/${archive.id}` : archive.recoveryUrl}>continue editing</a>{!archive.encrypted && <a href={`/a/${archive.shareSlug || archive.id}`} target="_blank" rel="noreferrer">view ↗</a>}</div>
     </li>)}</ul>
   </section>;
 }
