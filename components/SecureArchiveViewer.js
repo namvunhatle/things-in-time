@@ -61,12 +61,18 @@ export default function SecureArchiveViewer({ gate }) {
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({ authSecret: credentials.authSecret }),
       });
+      // only a 401 means the password (with this link) is wrong; say so only then
+      if (response.status === 401) throw new Error('that password didn’t match. try again.');
       if (response.status === 429) throw new Error('too many attempts. try again later.');
       const result = await response.json().catch(() => null);
-      if (!response.ok || !result?.archive) throw new Error('that password didn’t match. try again.');
-      setOpened(await openWithViewerKey(gate.id, credentials.wrapKey, result.archive));
+      if (!response.ok || !result?.archive) throw new Error(`couldn’t open the archive (error ${response.status}). try again.`);
+      try {
+        setOpened(await openWithViewerKey(gate.id, credentials.wrapKey, result.archive));
+      } catch {
+        throw new Error('the password matched, but the archive couldn’t be decrypted. ask the owner to reset the password.');
+      }
     } catch (unlockError) {
-      setError(unlockError.message?.startsWith('too many') ? unlockError.message : 'that password didn’t match. try again.');
+      setError(unlockError.message || 'couldn’t open the archive. try again.');
     } finally {
       setBusy(false);
     }

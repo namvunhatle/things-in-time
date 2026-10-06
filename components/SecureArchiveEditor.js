@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import ArchiveEditor from './ArchiveEditor';
 import PersonalArchiveEditor from './PersonalArchiveEditor';
-import { createEncryptedMedia, decryptDocument, decryptLinkSecret, encryptDocument } from '../lib/archive-crypto';
+import { createEncryptedMedia, decryptDocument, decryptLinkSecret, editorAuthSecret, encryptDocument, resetViewerPassword } from '../lib/archive-crypto';
 import { loadArchiveKey, rememberArchive } from '../lib/key-vault';
 
 const categories = {
@@ -41,6 +41,60 @@ function PlaintextCleanup({ archiveId, entryCount }) {
     <button type="button" disabled={state === 'working'} onClick={purge}>{state === 'working' ? 'removing…' : 'remove the old copy'}</button>
     {message && <p className="portal-error" role="alert">{message}</p>}
   </section>;
+}
+
+// Reset the viewer password with the recovery key. The share link (and its #secret) stays the same.
+function ViewerPasswordReset({ archive }) {
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState('');
+
+  async function submit(event) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const recoveryKey = String(form.get('recoveryKey') || '').trim();
+    const password = String(form.get('password') || '');
+    if (password !== form.get('confirm')) {
+      setMessage('the passwords don’t match.');
+      return;
+    }
+    setBusy(true);
+    setMessage('changing the password…');
+    try {
+      const session = await fetch(`/api/archives/${archive.id}/editor-session`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: await editorAuthSecret(archive.id, recoveryKey) }),
+      });
+      if (session.status === 429) throw new Error('too many attempts. try again later.');
+      if (!session.ok) throw new Error('that recovery key didn’t work.');
+      const { recoveryWrap } = await session.json();
+      const protection = await resetViewerPassword(archive.id, recoveryWrap, recoveryKey, archive.crypto.linkSecretWrap, password);
+      const response = await fetch(`/api/archives/${archive.id}/viewer-password`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(protection),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || 'couldn’t change the password.');
+      event.target.reset();
+      setMessage('password changed. the share link stays the same; the old password no longer works.');
+    } catch (error) {
+      setMessage(error.message || 'couldn’t change the password.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return <details className="migration-card viewer-password-reset">
+    <summary>reset viewer password</summary>
+    <form className="portal-form" onSubmit={submit}>
+      <label><span>recovery key</span><input name="recoveryKey" required autoComplete="off" spellCheck="false" placeholder="tit_…" /></label>
+      <label><span>new viewer password</span><input name="password" type="password" required minLength={12} maxLength={128} autoComplete="new-password" /></label>
+      <label><span>repeat password</span><input name="confirm" type="password" required minLength={12} maxLength={128} autoComplete="new-password" /></label>
+      <button type="submit" disabled={busy}>{busy ? 'changing…' : 'change password'}</button>
+      {message && <p role="status">{message}</p>}
+    </form>
+  </details>;
 }
 
 export default function SecureArchiveEditor({ archive }) {
@@ -97,8 +151,12 @@ export default function SecureArchiveEditor({ archive }) {
   if (opened.document.presentation === 'timeline') {
     return <>
       {archive.plaintextCleanupPending && <PlaintextCleanup archiveId={archive.id} entryCount={(opened.document.entries || []).length} />}
+      <ViewerPasswordReset archive={archive} />
       <PersonalArchiveEditor archive={identity} entries={opened.document.entries || []} categories={categories} secure={secure} />
     </>;
   }
-  return <ArchiveEditor archive={identity} secure={secure} />;
+  return <>
+    <ViewerPasswordReset archive={archive} />
+    <ArchiveEditor archive={identity} secure={secure} />
+  </>;
 }
