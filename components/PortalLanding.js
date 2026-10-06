@@ -4,8 +4,6 @@ import { useState } from 'react';
 import PortalCreateForm from './PortalCreateForm';
 import RecentArchives from './RecentArchives';
 
-const PERSONAL_ARCHIVE_SLUG = 'things-i-couldnt-say-in-time';
-
 export default function PortalLanding() {
   const [mode, setMode] = useState('create');
   const [viewValue, setViewValue] = useState('');
@@ -48,7 +46,7 @@ export default function PortalLanding() {
       </section>
       <RecentArchives />
       <PortalCreateForm />
-      <p className="portal-note">this browser remembers editor links · copy the recovery link before switching devices</p>
+      <p className="portal-note">editor links stay in this browser.</p>
     </> : <>
       <section className="portal-intro">
         <p className="eyebrow">view an archive</p>
@@ -60,7 +58,6 @@ export default function PortalLanding() {
         {error && <p className="portal-error" role="alert">{error}</p>}
         <button type="submit">open archive</button>
       </form>
-      <p className="portal-note"><a href={`/a/${PERSONAL_ARCHIVE_SLUG}`}>test with my archive →</a></p>
     </>}
   </main>;
 }
