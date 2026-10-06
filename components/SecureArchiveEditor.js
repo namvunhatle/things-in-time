@@ -6,12 +6,15 @@ import { createEncryptedMedia, decryptDocument, decryptLinkSecret, editorAuthSec
 import { loadArchiveKey, rememberArchive } from '../lib/key-vault';
 import { timelineToCanvas } from '../lib/canvas-layout';
 
-async function saveDocument(archiveId, dataKey, document) {
+async function saveDocument(archiveId, dataKey, document, { keepalive = false } = {}) {
   const encrypted = await encryptDocument(archiveId, dataKey, document);
+  const body = JSON.stringify({ document: encrypted });
   const response = await fetch(`/api/archives/${archiveId}/layout`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ document: encrypted }),
+    body,
+    // sent as the page is hidden: a keepalive request outlives the page, but only up to 64KB
+    keepalive: keepalive && body.length < 60_000,
   });
   if (!response.ok) throw new Error('save failed');
 }
@@ -144,9 +147,9 @@ export default function SecureArchiveEditor({ archive }) {
 
   const secure = {
     dataKey: opened.dataKey,
-    async save(document) {
+    async save(document, options) {
       // keep fields the canvas editor doesn't know about, such as legacyTimeline
-      await saveDocument(archive.id, opened.dataKey, { ...opened.document, ...document });
+      await saveDocument(archive.id, opened.dataKey, { ...opened.document, ...document }, options);
     },
     async upload(file) {
       const encrypted = await createEncryptedMedia(archive.id, opened.dataKey, await file.arrayBuffer());

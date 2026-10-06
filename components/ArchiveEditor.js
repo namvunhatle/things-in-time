@@ -1,13 +1,18 @@
 'use client';
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { DragDropProvider } from '@dnd-kit/react';
 import { isSortable, useSortable } from '@dnd-kit/react/sortable';
 import EncryptedImage from './EncryptedImage';
 import { randomToken } from '../lib/archive-crypto';
 import { isImageFile, prepareImage } from '../lib/prepare-image';
 import { STACKED_QUERY, isStacked, readingOrder, sideOf } from '../lib/canvas-order';
-import { ITEM_GAP, fittedCanvas, lowestBottom, moveInReadingOrder, pushApart } from '../lib/canvas-layout';
+import { ITEM_GAP, fittedCanvas, insertAtTop, lowestBottom, moveInReadingOrder, pushApart } from '../lib/canvas-layout';
+
+const IMAGE_TYPES = 'image/jpeg,image/png,image/webp,image/gif,image/avif';
+// coming back to the editor after this long starts a fresh page on a phone
+const NEW_PAGE_AFTER = 15 * 60 * 1000;
 
 const imageUrl = (archiveId, fileName) => `/api/archive-media/${archiveId}/${fileName}`;
 const itemStyle = (item, archive, order = {}) => ({
@@ -67,17 +72,37 @@ export default function ArchiveEditor({ archive, secure = null }) {
   const [recoveryUrl, setRecoveryUrl] = useState('');
   const [youtubeUrl, setYoutubeUrl] = useState('');
   const [stacked, setStacked] = useState(false);
+  // on a phone, an encrypted archive opens on a blank page at the top: a note that doesn't exist
+  // until the first character is typed, so opening and closing the editor leaves nothing behind
+  const [draft, setDraft] = useState(null);
+  const [showSubtitle, setShowSubtitle] = useState(false);
   // encrypted archives grow taller as they fill up; legacy ones keep the server's fixed size
   const [canvas, setCanvas] = useState(archive.canvas);
   const canvasSize = useRef(archive.canvas);
   const canvasRef = useRef(null);
   const itemsRef = useRef(items);
+  const titleRef = useRef(title);
+  const subtitleRef = useRef(subtitle);
+  const draftRef = useRef(null);
+  const lastNoteRef = useRef(null);
   const noteRefs = useRef(new Map());
+  const menuRef = useRef(null);
+  const subtitleField = useRef(null);
   const initialNoteRequested = useRef(false);
+  const saveChain = useRef(Promise.resolve());
+  const saveTimer = useRef(null);
+  const unsaved = useRef(false);
+  const saveRef = useRef(null);
   // encrypted archives carry the full link, with the #secret that opens them
   const shareUrl = archive.shareUrl || (typeof window === 'undefined' ? `/a/${archive.shareSlug}` : `${window.location.origin}/a/${archive.shareSlug}`);
 
   useEffect(() => { itemsRef.current = items; }, [items]);
+  // confirmations ("photo added", "editor link copied") fade out; work in progress and errors stay
+  useEffect(() => {
+    if (!status || status.endsWith('…') || status.startsWith('couldn')) return;
+    const timer = setTimeout(() => setStatus(''), 4000);
+    return () => clearTimeout(timer);
+  }, [status]);
   useEffect(() => {
     const query = window.matchMedia(STACKED_QUERY);
     const update = () => setStacked(query.matches);
@@ -86,10 +111,38 @@ export default function ArchiveEditor({ archive, secure = null }) {
     return () => query.removeEventListener('change', update);
   }, []);
   useEffect(() => {
+    if (stacked && secure && !draftRef.current) changeDraft(newNote(0));
+  }, [stacked]);
+  useEffect(() => {
+    // a phone gets the blank page instead
+    if (secure && isStacked()) return;
     if (!itemsRef.current.length && !initialNoteRequested.current) {
       initialNoteRequested.current = true;
       addNote();
     }
+  }, []);
+  // never lose writing: what's pending is saved when the page is hidden (switching apps, locking
+  // the phone, closing the tab). Coming back after a while starts a fresh page on a phone.
+  useEffect(() => {
+    let hiddenAt = 0;
+    function flush() {
+      if (unsaved.current) saveRef.current(undefined, undefined, undefined, { quiet: true, keepalive: true });
+    }
+    function visibility() {
+      if (document.visibilityState === 'hidden') {
+        hiddenAt = Date.now();
+        flush();
+      } else if (hiddenAt && Date.now() - hiddenAt > NEW_PAGE_AFTER && secure && isStacked() && !draftRef.current) {
+        changeDraft(newNote(0));
+        window.scrollTo(0, 0);
+      }
+    }
+    document.addEventListener('visibilitychange', visibility);
+    window.addEventListener('pagehide', flush);
+    return () => {
+      document.removeEventListener('visibilitychange', visibility);
+      window.removeEventListener('pagehide', flush);
+    };
   }, []);
   useEffect(() => {
     // encrypted archives keep no recovery link on the device (see lib/key-vault.js)
@@ -128,7 +181,7 @@ export default function ArchiveEditor({ archive, secure = null }) {
       if (!settledLayout.current) save(next);
     }
     settledLayout.current = true;
-  }, [items, dragging]);
+  }, [items, draft, dragging]);
 
   function canvasPoint(clientX, clientY) {
     const rect = canvasRef.current.getBoundingClientRect();
@@ -153,7 +206,10 @@ export default function ArchiveEditor({ archive, secure = null }) {
   }
 
   function replaceItems(updater) {
-    if (secure && Array.isArray(updater)) grow(updater);
+    if (Array.isArray(updater)) {
+      if (secure) grow(updater);
+      itemsRef.current = updater;
+    }
     setItems(current => {
       const next = typeof updater === 'function' ? updater(current) : updater;
       itemsRef.current = next;
@@ -161,24 +217,78 @@ export default function ArchiveEditor({ archive, secure = null }) {
     });
   }
 
-  async function save(nextItems = itemsRef.current, nextTitle = title, nextSubtitle = subtitle) {
-    setStatus('saving…');
-    try {
+  // Saves go out one at a time: the server refuses a write based on an older revision, which two
+  // overlapping saves would be. Quiet saves (while typing) don't flash "saving…"; a failed one
+  // leaves the work marked unsaved, so the next save or leaving the page tries again.
+  function save(nextItems = itemsRef.current, nextTitle = titleRef.current, nextSubtitle = subtitleRef.current, { quiet = false, keepalive = false } = {}) {
+    clearTimeout(saveTimer.current);
+    unsaved.current = false;
+    if (!quiet) setStatus('saving…');
+    const run = saveChain.current.then(async () => {
       if (secure) {
-        await secure.save({ presentation: 'canvas', title: nextTitle, subtitle: nextSubtitle, canvas: grow(nextItems), items: nextItems });
-        setStatus('');
+        await secure.save({ presentation: 'canvas', title: nextTitle, subtitle: nextSubtitle, canvas: grow(nextItems), items: nextItems }, { keepalive });
         return;
       }
-      const response = await fetch(`/api/archives/${archive.id}/layout`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: nextTitle, subtitle: nextSubtitle, items: nextItems }),
-      });
+      const body = JSON.stringify({ title: nextTitle, subtitle: nextSubtitle, items: nextItems });
+      // a keepalive request outlives the page, but only up to 64KB
+      const response = await fetch(`/api/archives/${archive.id}/layout`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body, keepalive: keepalive && body.length < 60_000 });
       if (!response.ok) throw new Error('save failed');
-      setStatus('');
-    } catch {
-      setStatus('couldn’t save');
+    }).then(
+      () => setStatus(current => current === 'saving…' || current === 'couldn’t save' ? '' : current),
+      () => {
+        unsaved.current = true;
+        setStatus('couldn’t save');
+      },
+    );
+    saveChain.current = run;
+    return run;
+  }
+  saveRef.current = save;
+
+  // typing saves itself a second after the last keystroke
+  function scheduleSave() {
+    unsaved.current = true;
+    clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => saveRef.current(undefined, undefined, undefined, { quiet: true }), 1000);
+  }
+
+  function changeDraft(next) {
+    draftRef.current = next;
+    setDraft(next);
+  }
+
+  // The first character turns the blank page into a note at the top. It keeps the page's key and
+  // place in the column, so React keeps the same textarea: the keyboard and the caret stay put.
+  function writeDraft(content) {
+    const current = draftRef.current;
+    if (!content.trim()) {
+      changeDraft({ ...current, content });
+      return;
     }
+    const note = { ...newNote(0), id: current.id, content };
+    lastNoteRef.current = note.id;
+    changeDraft(null);
+    replaceItems(insertAtTop(itemsRef.current, note));
+    scheduleSave();
+  }
+
+  // "write" on a phone: the blank page at the top, keyboard up (focus has to happen inside the tap)
+  function startWriting() {
+    if (!secure) {
+      addNote();
+      return;
+    }
+    if (!draftRef.current) flushSync(() => changeDraft(newNote(0)));
+    noteRefs.current.get(draftRef.current.id)?.focus();
+  }
+
+  // where a photo or video added on a phone goes: beside the note being written, after any
+  // already there, so it reads right after that note
+  function besideLastNote(width) {
+    const note = itemsRef.current.find(item => item.id === lastNoteRef.current && item.type === 'note');
+    if (!note) return null;
+    const attached = itemsRef.current.filter(item => item.attachedTo === note.id).length;
+    return { attachedTo: note.id, x: Math.min(canvasSize.current.width - width, note.x + note.width + 28), y: note.y + attached * 22 };
   }
 
   async function addNote() {
@@ -186,8 +296,8 @@ export default function ArchiveEditor({ archive, secure = null }) {
     setStatus('adding note…');
     try {
       if (secure) {
-        const item = newNote(nextFreeY());
-        const next = [...itemsRef.current, item];
+        const item = newNote(0);
+        const next = insertAtTop(itemsRef.current, item);
         replaceItems(next);
         await save(next);
         requestAnimationFrame(() => noteRefs.current.get(item.id)?.focus());
@@ -208,7 +318,7 @@ export default function ArchiveEditor({ archive, secure = null }) {
     }
   }
 
-  async function uploadFiles(files, point, attachedTo = null, alternate = false, placed = false) {
+  async function uploadFiles(files, point, { attachedTo = null, alternate = false, placed = false, atTop = false } = {}) {
     const images = [...files].filter(isImageFile);
     if (!images.length) {
       if (files.length) setStatus('choose a photo');
@@ -232,7 +342,7 @@ export default function ArchiveEditor({ archive, secure = null }) {
         try {
           const fileName = await secure.upload(prepared.blob);
           added = { id: randomToken(12), type: 'image', fileName, contentType: prepared.contentType, x, y, width: 280, alt: '', attachedTo, ...(placed ? { placed: true } : {}) };
-          next = [...next, added];
+          next = atTop ? insertAtTop(next, added) : [...next, added];
           replaceItems(next);
           await save(next);
           continue;
@@ -272,12 +382,14 @@ export default function ArchiveEditor({ archive, secure = null }) {
         const videoId = youtubeVideoId(youtubeUrl);
         if (!videoId) throw new Error('paste a valid YouTube link');
         const item = { id: randomToken(12), type: 'youtube', videoId, x: Math.max(0, 760 - (count % 4) * 24), y: nextFreeY(), width: 360 };
-        const next = [...itemsRef.current, item];
+        // on a phone it goes with the note being written, or on top, like everything new
+        const beside = isStacked() ? besideLastNote(item.width) : null;
+        const next = beside ? [...itemsRef.current, { ...item, ...beside }] : isStacked() ? insertAtTop(itemsRef.current, item) : [...itemsRef.current, item];
         replaceItems(next);
         await save(next);
         setYoutubeUrl('');
         setStatus('');
-        return;
+        return true;
       }
       const response = await fetch(`/api/archives/${archive.id}/youtube`, {
         method: 'POST',
@@ -289,23 +401,32 @@ export default function ArchiveEditor({ archive, secure = null }) {
       replaceItems(current => [...current, result.item]);
       setYoutubeUrl('');
       setStatus('');
+      return true;
     } catch (error) {
       setStatus(error.message || 'couldn’t add video');
+      return false;
     }
   }
 
   function dropOnCanvas(event) {
     event.preventDefault();
-    uploadFiles(event.dataTransfer.files, canvasPoint(event.clientX, event.clientY), null, false, true);
+    uploadFiles(event.dataTransfer.files, canvasPoint(event.clientX, event.clientY), { placed: true });
   }
 
   function choosePhotos(event) {
     const files = [...event.target.files];
     event.target.value = '';
     const count = itemsRef.current.filter(item => item.type === 'image').length;
+    if (isStacked() && secure) {
+      // phone: a photo goes with the note being written; with nothing written yet, on top
+      const beside = besideLastNote(280);
+      if (beside) uploadFiles(files, beside, { attachedTo: beside.attachedTo });
+      else uploadFiles(files, { x: count % 2 ? 80 : 620, y: 0 }, { atTop: true });
+      return;
+    }
     if (isStacked()) {
-      // phone: the photo goes after everything else, alternating sides, so it shows up at the bottom
-      uploadFiles(files, { x: count % 2 ? 80 : 620, y: secure ? nextFreeY() : Math.min(canvasSize.current.height - 80, itemsRef.current.reduce((max, item) => Math.max(max, item.y), 0) + 40) }, null, true);
+      // legacy archive on a phone: the photo goes after everything else, alternating sides
+      uploadFiles(files, { x: count % 2 ? 80 : 620, y: Math.min(canvasSize.current.height - 80, itemsRef.current.reduce((max, item) => Math.max(max, item.y), 0) + 40) }, { alternate: true });
       return;
     }
     uploadFiles(files, { x: 820 - (count % 4) * 28, y: 80 + (count % 6) * 42 });
@@ -318,7 +439,7 @@ export default function ArchiveEditor({ archive, secure = null }) {
     uploadFiles(event.dataTransfer.files, {
       x: Math.min(canvasSize.current.width - 280, note.x + note.width + 28),
       y: note.y,
-    }, note.id);
+    }, { attachedTo: note.id });
   }
 
   function beginMove(event, item) {
@@ -368,8 +489,14 @@ export default function ArchiveEditor({ archive, secure = null }) {
   }, [dragging]);
 
   function editNote(id, content) {
-    replaceItems(current => current.map(item => item.id === id ? { ...item, content } : item));
-    setStatus('unsaved');
+    replaceItems(itemsRef.current.map(item => item.id === id ? { ...item, content } : item));
+    scheduleSave();
+  }
+
+  function editSubtitle() {
+    menuRef.current?.close();
+    flushSync(() => setShowSubtitle(true));
+    subtitleField.current?.focus();
   }
 
   // legacy archives have a recovery link that opens the editor by itself; an encrypted archive's
@@ -384,29 +511,35 @@ export default function ArchiveEditor({ archive, secure = null }) {
   }
 
   const order = readingOrder(items);
-  // the phone column is in reading order in the DOM itself, so dnd-kit can reorder it
-  const shown = stacked ? [...items].sort((a, b) => order[a.id] - order[b.id]) : items;
+  // the phone column is in reading order in the DOM itself, so dnd-kit can reorder it; the blank
+  // page, when there is one, sits above everything and doesn't move
+  const sorted = stacked ? [...items].sort((a, b) => order[a.id] - order[b.id]) : items;
+  const shown = stacked && draft ? [draft, ...sorted] : sorted;
 
   function reorder(event) {
     if (event.canceled) return;
     const { source } = event.operation;
-    if (!isSortable(source) || source.sortable.initialIndex === source.sortable.index) return;
-    const next = moveInReadingOrder(itemsRef.current, source.sortable.initialIndex, source.sortable.index);
+    if (!isSortable(source)) return;
+    const offset = draftRef.current ? 1 : 0;
+    const from = source.sortable.initialIndex - offset;
+    const to = Math.max(0, source.sortable.index - offset);
+    if (from < 0 || from === to) return;
+    const next = moveInReadingOrder(itemsRef.current, from, to);
     replaceItems(next);
     save(next);
   }
 
   return <>
-    <header className="editor-bar">
+    <header className={`editor-bar${showSubtitle ? ' show-subtitle' : ''}`}>
       <div>
         <p className="eyebrow">editor</p>
-        <textarea className="editor-title" rows={1} value={title} maxLength={80} aria-label="archive name" onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); event.currentTarget.blur(); } }} onChange={event => setTitle(event.target.value)} onBlur={() => save(itemsRef.current, title, subtitle)} />
-        <textarea className="editor-subtitle" value={subtitle} maxLength={400} aria-label="archive subtitle" placeholder="subtitle" onChange={event => setSubtitle(event.target.value)} onBlur={() => save(itemsRef.current, title, subtitle)} />
+        <textarea className="editor-title" rows={1} value={title} maxLength={80} aria-label="archive name" onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); event.currentTarget.blur(); } }} onChange={event => { titleRef.current = event.target.value; setTitle(event.target.value); scheduleSave(); }} onBlur={() => { if (unsaved.current) save(); }} />
+        <textarea ref={subtitleField} className="editor-subtitle" value={subtitle} maxLength={400} aria-label="archive subtitle" placeholder="subtitle" onChange={event => { subtitleRef.current = event.target.value; setSubtitle(event.target.value); scheduleSave(); }} onBlur={() => { if (unsaved.current) save(); }} />
       </div>
       <div className="editor-actions">
         <div className="editor-create-actions">
           <button type="button" onClick={addNote}>+ text</button>
-          <label className="editor-upload">+ photo<input type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/avif" multiple onChange={choosePhotos} /></label>
+          <label className="editor-upload">+ photo<input type="file" accept={IMAGE_TYPES} multiple onChange={choosePhotos} /></label>
           <details className="editor-video-add">
             <summary>+ video</summary>
             <form className="youtube-add-form" onSubmit={addYoutube}>
@@ -424,9 +557,9 @@ export default function ArchiveEditor({ archive, secure = null }) {
     </header>
     <div ref={canvasRef} className={`archive-canvas editor-canvas${dragging ? ' is-dragging' : ''}`} style={{ aspectRatio: `${canvas.width} / ${canvas.height}` }} onDragOver={event => event.preventDefault()} onDrop={dropOnCanvas}>
       <DragDropProvider onDragEnd={reorder}>
-        {shown.map((item, index) => <Sortable key={item.id} id={item.id} index={index} disabled={!stacked || !secure}>{(ref, handleRef) => item.type === 'note' ? <article
+        {shown.map((item, index) => { const isDraft = item === draft; return <Sortable key={item.id} id={item.id} index={index} disabled={!stacked || !secure || isDraft}>{(ref, handleRef) => item.type === 'note' ? <article
           ref={ref}
-          className={`canvas-note canvas-entry${dropTarget === item.id ? ' is-drop-target' : ''}`}
+          className={`canvas-note canvas-entry${isDraft ? ' is-draft' : ''}${dropTarget === item.id ? ' is-drop-target' : ''}`}
           style={itemStyle(item, { canvas })} data-item={item.id}
           onDragEnter={event => { event.preventDefault(); setDropTarget(item.id); }}
           onDragOver={event => event.preventDefault()}
@@ -438,7 +571,7 @@ export default function ArchiveEditor({ archive, secure = null }) {
             {item.time && <span>{timeLabel(item.time)}</span>}
           </div>
           <div className="note-writing">
-            <textarea ref={node => { if (node) noteRefs.current.set(item.id, node); else noteRefs.current.delete(item.id); }} className="note-editor" value={item.content} maxLength={10000} aria-label={`text dump from ${dateLabel(item.date)}`} placeholder="type it here. leave it rough." onChange={event => editNote(item.id, event.target.value)} onBlur={() => save(itemsRef.current)} />
+            <textarea ref={node => { if (node) noteRefs.current.set(item.id, node); else noteRefs.current.delete(item.id); }} className="note-editor" rows={1} value={item.content} maxLength={10000} aria-label={isDraft ? 'new entry' : `text dump from ${dateLabel(item.date)}`} placeholder="type it here. leave it rough." onChange={event => isDraft ? writeDraft(event.target.value) : editNote(item.id, event.target.value)} onFocus={() => { lastNoteRef.current = isDraft ? null : item.id; }} onBlur={() => { if (unsaved.current) save(); }} />
           </div>
         </article> : item.type === 'youtube' ? <div ref={ref} className={`canvas-item youtube-sticky side-${sideOf(item, canvas)}`} style={itemStyle(item, { canvas })} data-item={item.id} onPointerDown={event => beginMove(event, item)}>
           <div className="youtube-frame youtube-placeholder" aria-label="YouTube video preview">
@@ -449,8 +582,28 @@ export default function ArchiveEditor({ archive, secure = null }) {
           <div className="youtube-card-label"><span>{item.title || 'youtube'}</span></div>
         </div> : <div ref={ref} className={`canvas-item sticky-photo side-${sideOf(item, canvas)}`} style={itemStyle(item, { canvas })} data-item={item.id} onPointerDown={event => beginMove(event, item)}>
           {secure ? <EncryptedImage archiveId={archive.id} fileName={item.fileName} dataKey={secure.dataKey} contentType={item.contentType} alt={item.alt || ''} draggable="false" /> : <img src={imageUrl(archive.id, item.fileName)} alt={item.alt || ''} draggable="false" />}
-        </div>}</Sortable>)}
+        </div>}</Sortable>; })}
       </DragDropProvider>
     </div>
+    {/* phone: everything but writing lives in one bar at the bottom, in reach of the thumb */}
+    <nav className="mobile-bar" aria-label="editor">
+      <button type="button" onClick={startWriting}>write</button>
+      <label className="mobile-photo">photo<input type="file" accept={IMAGE_TYPES} multiple onChange={choosePhotos} /></label>
+      <button type="button" onClick={() => menuRef.current?.showModal()}>more</button>
+      {status && <span className="mobile-status" role="status">{status}</span>}
+    </nav>
+    <dialog ref={menuRef} className="mobile-sheet" aria-label="more" onClick={event => { if (event.target === event.currentTarget) event.currentTarget.close(); }}>
+      <div className="mobile-sheet-body">
+        <form className="sheet-video" onSubmit={async event => { if (await addYoutube(event)) menuRef.current?.close(); }}>
+          <input type="url" value={youtubeUrl} onChange={event => setYoutubeUrl(event.target.value)} placeholder="paste a youtube link" aria-label="YouTube link" />
+          <button type="submit">add video</button>
+        </form>
+        <button type="button" onClick={copyEditorLink}>copy editor link</button>
+        <a href={shareUrl} target="_blank" rel="noreferrer">view link ↗</a>
+        <button type="button" onClick={editSubtitle}>{subtitle ? 'edit subtitle' : 'add a subtitle'}</button>
+        {status && <p className="sheet-status" role="status">{status}</p>}
+        <button type="button" className="sheet-close" onClick={() => menuRef.current?.close()}>close</button>
+      </div>
+    </dialog>
   </>;
 }
