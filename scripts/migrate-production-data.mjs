@@ -22,6 +22,7 @@ async function names(directory) {
 }
 
 async function migratePublishedEntries(sql) {
+  const overwrite = process.argv.includes('--overwrite-entries');
   let count = 0;
   for (const name of await names(entriesRoot)) {
     if (!name.endsWith('.md')) continue;
@@ -29,13 +30,19 @@ async function migratePublishedEntries(sql) {
     if (data.draft) continue;
     const document = { ...data, id: name.replace(/\.md$/, ''), content };
     const sortKey = `${document.date || '0000-00-00'}T${document.time || '23:59'}`;
-    await sql`INSERT INTO published_entries (id, owner_id, document, sort_key)
-      VALUES (${document.id}, 'user_01', ${JSON.stringify(document)}::jsonb, ${sortKey})
-      ON CONFLICT (id) DO UPDATE SET
-        owner_id = EXCLUDED.owner_id,
-        document = EXCLUDED.document,
-        sort_key = EXCLUDED.sort_key,
-        updated_at = NOW()`;
+    if (overwrite) {
+      await sql`INSERT INTO published_entries (id, owner_id, document, sort_key)
+        VALUES (${document.id}, 'user_01', ${JSON.stringify(document)}::jsonb, ${sortKey})
+        ON CONFLICT (id) DO UPDATE SET
+          owner_id = EXCLUDED.owner_id,
+          document = EXCLUDED.document,
+          sort_key = EXCLUDED.sort_key,
+          updated_at = NOW()`;
+    } else {
+      await sql`INSERT INTO published_entries (id, owner_id, document, sort_key)
+        VALUES (${document.id}, 'user_01', ${JSON.stringify(document)}::jsonb, ${sortKey})
+        ON CONFLICT (id) DO NOTHING`;
+    }
     count += 1;
   }
   return count;

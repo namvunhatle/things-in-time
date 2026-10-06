@@ -70,6 +70,8 @@ Sau khi editor recovery link được mở, browser lưu link đó trong `localS
 
 Archive production của `user_01` dùng cùng share-password flow tại `/a/things-i-couldnt-say-in-time`. Nó đọc 13 published entries từ Neon và là dữ liệu thật để smoke-test view mode.
 
+Editor riêng của archive này dùng recovery link tại `/portal/user_01_personal_archive/claim#key=...`. Chạy `npm run personal-editor-link` để rotate và in một link mới. Migration mặc định chỉ thêm entry chưa tồn tại, nên không ghi đè nội dung đã sửa trong editor; chỉ dùng `--overwrite-entries` khi chủ động muốn khôi phục lại bản local.
+
 ## Trạng thái kiểm tra — 06/10/2026
 
 Dependencies đã cài đủ và audit không còn vulnerability đã biết. Production build Next.js 16.3.8 đã thành công. Password gate, 13 entry từ Neon và toàn bộ flow tạo archive → editor recovery link → text dump → share password → reader view đã qua smoke test trên `https://things-in-time.vercel.app`. Test archive tạm đã được xóa sau khi kiểm tra.
