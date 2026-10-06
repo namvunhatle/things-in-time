@@ -78,3 +78,4 @@
 @media(max-width:699px){.archive-canvas>.side-right{margin-right:8px}.archive-canvas>.side-left{margin-left:8px}}
 .viewer-password-reset{margin-top:72px}
 .editor-canvas .note-editor{resize:none;overflow:hidden}
+@media(max-width:699px){.editor-canvas .canvas-item,.editor-canvas .note-meta{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}.editor-canvas .note-meta::after{content:'hold to move';margin-left:auto;font:10px/1.5 var(--mono);opacity:.55}.archive-canvas>[data-dnd-dragging][data-dnd-dragging]{position:fixed!important;top:var(--dnd-top,0px)!important;left:var(--dnd-left,0px)!important;width:var(--dnd-width,auto)!important;max-width:var(--dnd-width,auto)!important;box-shadow:0 18px 40px rgba(53,52,47,.22)}.archive-canvas>.canvas-note[data-dnd-dragging]{background:var(--paper)}}

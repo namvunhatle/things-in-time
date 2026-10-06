@@ -1,11 +1,13 @@
 'use client';
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { DragDropProvider } from '@dnd-kit/react';
+import { isSortable, useSortable } from '@dnd-kit/react/sortable';
 import EncryptedImage from './EncryptedImage';
 import { randomToken } from '../lib/archive-crypto';
 import { isImageFile, prepareImage } from '../lib/prepare-image';
-import { isStacked, readingOrder, sideOf } from '../lib/canvas-order';
-import { ITEM_GAP, fittedCanvas, lowestBottom, pushApart } from '../lib/canvas-layout';
+import { STACKED_QUERY, isStacked, readingOrder, sideOf } from '../lib/canvas-order';
+import { ITEM_GAP, fittedCanvas, lowestBottom, moveInReadingOrder, pushApart } from '../lib/canvas-layout';
 
 const imageUrl = (archiveId, fileName) => `/api/archive-media/${archiveId}/${fileName}`;
 const itemStyle = (item, archive, order = {}) => ({
@@ -48,6 +50,13 @@ function youtubeVideoId(value) {
   }
 }
 
+// On a phone the canvas is one column and items are reordered by long-press and drag (dnd-kit);
+// on a wider screen they are moved freely with beginMove below.
+function Sortable({ id, index, disabled, children }) {
+  const { ref, handleRef } = useSortable({ id, index, disabled });
+  return children(ref, handleRef);
+}
+
 export default function ArchiveEditor({ archive, secure = null }) {
   const [items, setItems] = useState(archive.items);
   const [title, setTitle] = useState(archive.title);
@@ -57,6 +66,7 @@ export default function ArchiveEditor({ archive, secure = null }) {
   const [dropTarget, setDropTarget] = useState(null);
   const [recoveryUrl, setRecoveryUrl] = useState('');
   const [youtubeUrl, setYoutubeUrl] = useState('');
+  const [stacked, setStacked] = useState(false);
   // encrypted archives grow taller as they fill up; legacy ones keep the server's fixed size
   const [canvas, setCanvas] = useState(archive.canvas);
   const canvasSize = useRef(archive.canvas);
@@ -68,6 +78,13 @@ export default function ArchiveEditor({ archive, secure = null }) {
   const shareUrl = archive.shareUrl || (typeof window === 'undefined' ? `/a/${archive.shareSlug}` : `${window.location.origin}/a/${archive.shareSlug}`);
 
   useEffect(() => { itemsRef.current = items; }, [items]);
+  useEffect(() => {
+    const query = window.matchMedia(STACKED_QUERY);
+    const update = () => setStacked(query.matches);
+    update();
+    query.addEventListener('change', update);
+    return () => query.removeEventListener('change', update);
+  }, []);
   useEffect(() => {
     if (!itemsRef.current.length && !initialNoteRequested.current) {
       initialNoteRequested.current = true;
@@ -191,7 +208,7 @@ export default function ArchiveEditor({ archive, secure = null }) {
     }
   }
 
-  async function uploadFiles(files, point, attachedTo = null, alternate = false) {
+  async function uploadFiles(files, point, attachedTo = null, alternate = false, placed = false) {
     const images = [...files].filter(isImageFile);
     if (!images.length) {
       if (files.length) setStatus('choose a photo');
@@ -214,7 +231,7 @@ export default function ArchiveEditor({ archive, secure = null }) {
       if (secure) {
         try {
           const fileName = await secure.upload(prepared.blob);
-          added = { id: randomToken(12), type: 'image', fileName, contentType: prepared.contentType, x, y, width: 280, alt: '', attachedTo };
+          added = { id: randomToken(12), type: 'image', fileName, contentType: prepared.contentType, x, y, width: 280, alt: '', attachedTo, ...(placed ? { placed: true } : {}) };
           next = [...next, added];
           replaceItems(next);
           await save(next);
@@ -279,7 +296,7 @@ export default function ArchiveEditor({ archive, secure = null }) {
 
   function dropOnCanvas(event) {
     event.preventDefault();
-    uploadFiles(event.dataTransfer.files, canvasPoint(event.clientX, event.clientY));
+    uploadFiles(event.dataTransfer.files, canvasPoint(event.clientX, event.clientY), null, false, true);
   }
 
   function choosePhotos(event) {
@@ -309,6 +326,8 @@ export default function ArchiveEditor({ archive, secure = null }) {
     if (isStacked()) return;
     event.preventDefault();
     const point = canvasPoint(event.clientX, event.clientY);
+    // a photo or video put somewhere by hand stays there, even over a note's text (see pushApart)
+    if (item.type !== 'note' && !item.placed) replaceItems(itemsRef.current.map(candidate => candidate.id === item.id ? { ...candidate, placed: true } : candidate));
     setDragging({ id: item.id, offsetX: point.x - item.x, offsetY: point.y - item.y });
   }
 
@@ -372,6 +391,17 @@ export default function ArchiveEditor({ archive, secure = null }) {
   }
 
   const order = readingOrder(items);
+  // the phone column is in reading order in the DOM itself, so dnd-kit can reorder it
+  const shown = stacked ? [...items].sort((a, b) => order[a.id] - order[b.id]) : items;
+
+  function reorder(event) {
+    if (event.canceled) return;
+    const { source } = event.operation;
+    if (!isSortable(source) || source.sortable.initialIndex === source.sortable.index) return;
+    const next = moveInReadingOrder(itemsRef.current, source.sortable.initialIndex, source.sortable.index);
+    replaceItems(next);
+    save(next);
+  }
 
   return <>
     <header className="editor-bar">
@@ -401,32 +431,34 @@ export default function ArchiveEditor({ archive, secure = null }) {
       </div>
     </header>
     <div ref={canvasRef} className={`archive-canvas editor-canvas${dragging ? ' is-dragging' : ''}`} style={{ aspectRatio: `${canvas.width} / ${canvas.height}` }} onDragOver={event => event.preventDefault()} onDrop={dropOnCanvas}>
-      {items.map(item => item.type === 'note' ? <article
-        key={item.id}
-        className={`canvas-note canvas-entry${dropTarget === item.id ? ' is-drop-target' : ''}`}
-        style={itemStyle(item, { canvas }, order)} data-item={item.id}
-        onDragEnter={event => { event.preventDefault(); setDropTarget(item.id); }}
-        onDragOver={event => event.preventDefault()}
-        onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget)) setDropTarget(null); }}
-        onDrop={event => dropOnNote(event, item)}
-      >
-        <div className="note-meta" onPointerDown={event => beginMove(event, item)}>
-          <time dateTime={`${item.date}T${item.time}+07:00`}>{dateLabel(item.date)}</time>
-          {item.time && <span>{timeLabel(item.time)}</span>}
-        </div>
-        <div className="note-writing">
-          <textarea ref={node => { if (node) noteRefs.current.set(item.id, node); else noteRefs.current.delete(item.id); }} className="note-editor" value={item.content} maxLength={10000} aria-label={`text dump from ${dateLabel(item.date)}`} placeholder="type it here. leave it rough." onChange={event => editNote(item.id, event.target.value)} onBlur={() => save(itemsRef.current)} />
-        </div>
-      </article> : item.type === 'youtube' ? <div key={item.id} className={`canvas-item youtube-sticky side-${sideOf(item, canvas)}`} style={itemStyle(item, { canvas }, order)} data-item={item.id} onPointerDown={event => beginMove(event, item)}>
-        <div className="youtube-frame youtube-placeholder" aria-label="YouTube video preview">
-          {item.thumbnailFileName && !secure && <img className="youtube-thumbnail" src={imageUrl(archive.id, item.thumbnailFileName)} alt="" draggable="false" />}
-          {secure && <img className="youtube-thumbnail" src={`https://i.ytimg.com/vi/${item.videoId}/hqdefault.jpg`} alt="" draggable="false" referrerPolicy="no-referrer" />}
-          <span className="youtube-play" aria-hidden="true">▶</span>
-        </div>
-        <div className="youtube-card-label"><span>{item.title || 'youtube'}</span></div>
-      </div> : <div key={item.id} className={`canvas-item sticky-photo side-${sideOf(item, canvas)}`} style={itemStyle(item, { canvas }, order)} data-item={item.id} onPointerDown={event => beginMove(event, item)}>
-        {secure ? <EncryptedImage archiveId={archive.id} fileName={item.fileName} dataKey={secure.dataKey} contentType={item.contentType} alt={item.alt || ''} draggable="false" /> : <img src={imageUrl(archive.id, item.fileName)} alt={item.alt || ''} draggable="false" />}
-      </div>)}
+      <DragDropProvider onDragEnd={reorder}>
+        {shown.map((item, index) => <Sortable key={item.id} id={item.id} index={index} disabled={!stacked || !secure}>{(ref, handleRef) => item.type === 'note' ? <article
+          ref={ref}
+          className={`canvas-note canvas-entry${dropTarget === item.id ? ' is-drop-target' : ''}`}
+          style={itemStyle(item, { canvas })} data-item={item.id}
+          onDragEnter={event => { event.preventDefault(); setDropTarget(item.id); }}
+          onDragOver={event => event.preventDefault()}
+          onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget)) setDropTarget(null); }}
+          onDrop={event => dropOnNote(event, item)}
+        >
+          <div ref={handleRef} className="note-meta" onPointerDown={event => beginMove(event, item)}>
+            <time dateTime={`${item.date}T${item.time}+07:00`}>{dateLabel(item.date)}</time>
+            {item.time && <span>{timeLabel(item.time)}</span>}
+          </div>
+          <div className="note-writing">
+            <textarea ref={node => { if (node) noteRefs.current.set(item.id, node); else noteRefs.current.delete(item.id); }} className="note-editor" value={item.content} maxLength={10000} aria-label={`text dump from ${dateLabel(item.date)}`} placeholder="type it here. leave it rough." onChange={event => editNote(item.id, event.target.value)} onBlur={() => save(itemsRef.current)} />
+          </div>
+        </article> : item.type === 'youtube' ? <div ref={ref} className={`canvas-item youtube-sticky side-${sideOf(item, canvas)}`} style={itemStyle(item, { canvas })} data-item={item.id} onPointerDown={event => beginMove(event, item)}>
+          <div className="youtube-frame youtube-placeholder" aria-label="YouTube video preview">
+            {item.thumbnailFileName && !secure && <img className="youtube-thumbnail" src={imageUrl(archive.id, item.thumbnailFileName)} alt="" draggable="false" />}
+            {secure && <img className="youtube-thumbnail" src={`https://i.ytimg.com/vi/${item.videoId}/hqdefault.jpg`} alt="" draggable="false" referrerPolicy="no-referrer" />}
+            <span className="youtube-play" aria-hidden="true">▶</span>
+          </div>
+          <div className="youtube-card-label"><span>{item.title || 'youtube'}</span></div>
+        </div> : <div ref={ref} className={`canvas-item sticky-photo side-${sideOf(item, canvas)}`} style={itemStyle(item, { canvas })} data-item={item.id} onPointerDown={event => beginMove(event, item)}>
+          {secure ? <EncryptedImage archiveId={archive.id} fileName={item.fileName} dataKey={secure.dataKey} contentType={item.contentType} alt={item.alt || ''} draggable="false" /> : <img src={imageUrl(archive.id, item.fileName)} alt={item.alt || ''} draggable="false" />}
+        </div>}</Sortable>)}
+      </DragDropProvider>
     </div>
   </>;
 }
