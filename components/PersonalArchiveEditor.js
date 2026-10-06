@@ -15,6 +15,20 @@ function EntryForm({ archiveId, entry, categories, onSaved, isNew = false }) {
     if (!isNew) setStatus('unsaved');
   }
 
+  function toggleSong(enabled) {
+    setValue(current => ({
+      ...current,
+      category: enabled ? 'songs' : current.category === 'songs' ? 'unsaid' : current.category,
+      song: enabled ? (current.song || { title: '', artist: '', url: '' }) : null,
+    }));
+    if (!isNew) setStatus('unsaved');
+  }
+
+  function changeSong(field, next) {
+    setValue(current => ({ ...current, song: { ...current.song, [field]: next } }));
+    if (!isNew) setStatus('unsaved');
+  }
+
   async function submit(event) {
     event.preventDefault();
     setStatus('saving…');
@@ -29,9 +43,10 @@ function EntryForm({ archiveId, entry, categories, onSaved, isNew = false }) {
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || 'save failed');
+      setValue(result.entry);
       setStatus('');
       onSaved(result.entry);
-      if (isNew) setValue({ title: '', content: '', date: today(), time: '', category: 'unsaid' });
+      if (isNew) setValue({ title: '', content: '', date: today(), time: '', category: 'unsaid', song: null });
     } catch (error) {
       setStatus(error.message || 'couldn’t save');
     }
@@ -41,9 +56,15 @@ function EntryForm({ archiveId, entry, categories, onSaved, isNew = false }) {
     <div className="personal-entry-meta">
       <label><span>date</span><input type="date" value={value.date} required onChange={event => change('date', event.target.value)} /></label>
       <label><span>time</span><input type="time" value={value.time || ''} onChange={event => change('time', event.target.value)} /></label>
-      <label><span>category</span><select value={value.category || 'unsaid'} onChange={event => change('category', event.target.value)}>{Object.entries(categories).filter(([key]) => key !== 'all').map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
+      <label><span>category</span><select value={value.category || 'unsaid'} disabled={Boolean(value.song)} onChange={event => change('category', event.target.value)}>{Object.entries(categories).filter(([key]) => key !== 'all').map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
     </div>
-    <label className="personal-entry-title"><span>title</span><input value={value.title || ''} maxLength={200} placeholder="optional" onChange={event => change('title', event.target.value)} /></label>
+    <label className="song-toggle"><input type="checkbox" checked={Boolean(value.song)} onChange={event => toggleSong(event.target.checked)} /><span>song</span></label>
+    {value.song && <div className="personal-song-fields">
+      <label><span>song title</span><input value={value.song.title || ''} maxLength={200} required onChange={event => changeSong('title', event.target.value)} /></label>
+      <label><span>artist</span><input value={value.song.artist || ''} maxLength={200} required onChange={event => changeSong('artist', event.target.value)} /></label>
+      <label><span>link <small>optional</small></span><input type="url" value={value.song.url || ''} maxLength={1000} placeholder="https://" onChange={event => changeSong('url', event.target.value)} /></label>
+    </div>}
+    {!value.song && <label className="personal-entry-title"><span>title</span><input value={value.title || ''} maxLength={200} placeholder="optional" onChange={event => change('title', event.target.value)} /></label>}
     <label className="personal-entry-content"><span>text</span><textarea value={value.content || ''} maxLength={20000} required placeholder="leave it rough." onChange={event => change('content', event.target.value)} /></label>
     <div className="personal-entry-save"><button type="submit">{isNew ? 'publish' : 'save'}</button>{status && <span role="status">{status}</span>}</div>
   </form>;
@@ -112,12 +133,12 @@ export default function PersonalArchiveEditor({ archive, entries: initialEntries
     </header>
     <details className="personal-composer">
       <summary>new entry</summary>
-      <EntryForm archiveId={archive.id} entry={{ title: '', content: '', date: today(), time: '', category: 'unsaid' }} categories={categories} onSaved={addEntry} isNew />
+      <EntryForm archiveId={archive.id} entry={{ title: '', content: '', date: today(), time: '', category: 'unsaid', song: null }} categories={categories} onSaved={addEntry} isNew />
     </details>
     <section className="personal-entry-list" aria-label="published entries">
       <p className="eyebrow">{entries.length} published entries</p>
       {entries.map(entry => <details className="personal-entry" key={entry.id}>
-        <summary><time dateTime={`${entry.date}${entry.time ? `T${entry.time}` : ''}`}>{entry.date}</time><span>{entry.title || entry.content.split('\n')[0]}</span></summary>
+        <summary><time dateTime={`${entry.date}${entry.time ? `T${entry.time}` : ''}`}>{entry.date}</time><span>{entry.song?.title || entry.title || entry.content.split('\n')[0]}</span></summary>
         <EntryForm archiveId={archive.id} entry={entry} categories={categories} onSaved={replaceEntry} />
       </details>)}
     </section>
