@@ -1,128 +1,98 @@
 # things i couldn't say in time
 
-Một archive riêng tư, theo thời gian. Không analytics, không feed mạng xã hội, không autoplay, không ảnh hay nhạc tải từ bên thứ ba khi đọc.
+A private archive for the things you want to keep: text dumps, photos, songs, videos. You share it with a link and a password. Your browser encrypts everything before it is saved, so the server stores only ciphertext. **The operator of this site cannot read your archive.**
 
-## Thêm một dump
+Live: https://things-in-time.vercel.app
 
-1. Chạy `npm run entry -- ten-entry` để tạo một file có ngày/giờ Việt Nam trong `.confidential/entries/`. Hoặc copy một file từ `content/examples/` vào thư mục confidential với tên mới.
-2. Viết dưới dấu `---` thứ hai. Không cần sửa UI. Một dòng trống tách hai đoạn.
-3. Xóa `draft: true` khi muốn hiển thị.
-4. Chạy `npm run check`, rồi `npx vercel --prod` để cập nhật site. Local Markdown không tự upload khi save.
+## Security model in one minute
 
-Mười ba entry English đã duyệt là archive production của `user_01`. Chúng được lưu local trong `.confidential/entries/` để biên tập và được migrate vào Neon khi publish. Các ví dụ ảnh, nhạc, mixed và unfinished nằm riêng trong `content/examples/`, không xuất hiện trên site.
+| You hold | It does | If you lose it |
+|---|---|---|
+| **Recovery key** (`tit_…`, 256-bit, shown once) | Opens the editor on any device, resets the viewer password | The archive is gone. Nobody can recover it, including us |
+| **Share link**, including the part after `#` (128-bit link secret) | With the password, lets someone read the archive | Open the editor and copy the link again |
+| **Viewer password** | With the share link, lets someone read the archive | Reset it in the editor with your recovery key |
 
-### Header của entry
+The server never receives the recovery key, the link secret or the password. Browsers do not send the `#fragment` of a URL to the server, and the password is stretched in the browser.
 
-```yaml
----
-date: "2026-10-05"
-time: "02:47" # tùy chọn; giờ Việt Nam, định dạng 24h
-kind: dump # dump / line / realization / memory / song
-category: unsaid # tùy chọn: understood / miss / songs / home / unsaid
-lang: en # entry được publish phải là English
-tags: [một điều nhỏ] # tùy chọn
-draft: true # xóa dòng này khi sẵn sàng
----
-```
+## How the encryption works
 
-Mới nhất ở trên. Entry không có giờ được xếp ở đầu ngày, trước các ngày cũ hơn. Cùng ngày/giờ thì tên file quyết định thứ tự. `kind` chỉ điều chỉnh nhịp trình bày; `category` quyết định filter.
+All of it uses WebCrypto in the browser. The code is in [`lib/archive-crypto.js`](lib/archive-crypto.js).
 
-### Ảnh
+**Data key.** Each archive gets a random AES-256-GCM key. It encrypts:
+- the archive document (title, entries, layout);
+- every photo, each with a fresh 96-bit IV.
 
-Lưu ảnh riêng trong `.confidential/photos/`, rồi thêm ảnh vào bất kỳ vị trí nào giữa các đoạn:
+Every ciphertext is bound by its AAD to the archive id and its purpose: `things-in-time:<archiveId>:document:v2`, `…:media:<fileName>:v2`, and so on. A blob cannot be swapped into a different archive or a different slot.
 
-```md
-![mô tả để đọc bằng screen reader](/media/home.jpg "caption tùy chọn")
-```
+**Owner path.** HKDF-SHA256 derives two values from the recovery key:
+- `archive-key-wrap`: an AES key that wraps the data key. The server stores this wrap as `recoveryWrap`.
+- `editor-auth`: a secret that proves ownership. The server stores only its SHA-256 hash.
 
-Tên file chỉ dùng chữ/số, dấu gạch ngang, gạch dưới và dấu chấm. JPEG/PNG/WebP/AVIF/GIF được hỗ trợ. Ảnh không nằm trong `public/`; mỗi request tới ảnh đều kiểm tra session. Nén ảnh trước khi thêm; nếu muốn bỏ vị trí GPS thì export bản không chứa metadata trước. Không có ảnh cá nhân nào được tự lấy từ những file khác của bạn.
+**Viewer path.** The password is first stretched with PBKDF2-SHA256 (600,000 iterations, random 16-byte salt). It is then combined with the link secret through HKDF-SHA256, which gives:
+- `viewer-key-wrap`: wraps the data key. Stored as `viewerWrap`.
+- `viewer-auth`: the server keeps only its SHA-256 hash.
 
-### Nhạc
+Because the link secret is mixed in, a database dump on its own is not enough to guess passwords offline.
 
-Thêm `song:` trong header; xem `content/examples/song.md`. Có title, artist, link HTTPS, lyric tùy chọn tối đa 10 từ. `art: /media/album.jpg` thêm ảnh bìa tùy chọn, cũng được bảo vệ bằng passcode. Ghi chú nằm trong phần Markdown. Không embed tự tải để tránh gửi dữ liệu sang dịch vụ nghe nhạc. Link chỉ mở khi người đọc bấm.
+**Unlocking is two steps:**
+1. Anyone with the share URL gets only the **gate**: the KDF salt and the wrapped link secret.
+2. The browser derives `viewer-auth` and sends it. Only when it matches does the server return `viewerWrap` and the encrypted document.
 
-## Chạy local
+Both steps are rate limited per IP and per archive. IPs are stored only as HMAC hashes.
+
+**On the owner's device.** After the recovery key is entered once, the data key is kept in IndexedDB as a **non-extractable** `CryptoKey`. Page scripts can use it to encrypt and decrypt but cannot read its bytes. The recovery key itself is never stored.
+
+**Photos.** Each photo is re-encoded in the browser before it is encrypted: at most 2560 px, JPEG. This strips EXIF metadata such as GPS location and the camera serial.
+
+## What the server can still see
+
+End-to-end encryption hides content, not everything. The server and its providers (Vercel, Neon, Vercel Blob) can see:
+
+- archive ids, share slugs, creation and update times, revision counts;
+- the number and size of encrypted photos;
+- IP addresses in request logs;
+- page views through Vercel Web Analytics. These are cookieless, and archive ids and slugs are replaced with `[id]` / `[slug]` before they are sent ([`components/SiteAnalytics.js`](components/SiteAnalytics.js)).
+
+YouTube thumbnails and players load from YouTube's domains, and only when a viewer opens an archive that contains one.
+
+Archives created before encryption (format `version: 1`) are stored in plaintext until their owner turns on encryption from the editor.
+
+## Limits you should know
+
+- **You must trust the JavaScript the site serves.** This is true of every end-to-end encrypted web app. A compromised server or deployment could ship code that leaks keys. Open source lets you audit the code, but your browser cannot prove the deployed bundle matches this repository. If that matters to you, run your own instance.
+- **Anyone who can read can keep a copy.** A person with the link and password can save, screenshot or share what they see.
+- **Losing the recovery key is final.** There is no reset by email, because there is no account to reset.
+- **No independent audit yet.** Reviews are welcome: see [SECURITY.md](SECURITY.md).
+
+## Other protections
+
+- Strict Content-Security-Policy with a per-request nonce and `strict-dynamic`; `frame-ancestors 'none'`; `object-src 'none'`.
+- HttpOnly, `SameSite=Strict`, `Secure` session cookies, signed with HMAC.
+- Same-origin checks on state-changing API routes.
+- `Cache-Control: private, no-store` on pages and media; `noindex` everywhere; `robots.txt` blocks crawlers.
+- The upload quota (100 files, 100 MB per archive) is enforced atomically in the database.
+
+## Run your own
 
 ```sh
 npm install
-npm run setup
-# Passcode nằm trong .env.local; giữ file này riêng tư.
-npm run dev
+npm run setup     # writes .env.local with fresh secrets
+npm run dev       # http://127.0.0.1:3000
 ```
 
-Mở http://127.0.0.1:3000. `npm run build` kiểm tra nội dung và build production; `npm start` chạy bản production.
+Without `DATABASE_URL`, data is stored on disk in `.archive-data/`, which is git-ignored. For production, set these in Vercel:
 
-## Portal và archive canvas
+| Variable | Purpose |
+|---|---|
+| `ARCHIVE_SESSION_SECRET` | HMAC key for session cookies and rate-limit hashes |
+| `DATABASE_URL` | Neon Postgres |
+| `BLOB_READ_WRITE_TOKEN` | Vercel Blob (private), for encrypted photos |
+| `ARCHIVE_PASSCODE`, `ARCHIVE_ACCESS` | Legacy site-wide gate. Keep `ARCHIVE_ACCESS=private` |
 
-Mở `/` để vào product landing. Mặc định là **create**; chuyển sang **view** để dán share link. `/portal` redirect về `/`. Mỗi archive có:
+Generate a secret with `node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"`.
 
-- editor URL riêng chứa editor key; giữ link này riêng tư
-- share URL chỉ để xem
-- password riêng cho share view; server chỉ lưu hash
-- text dump viết trực tiếp trên canvas, cùng nhịp chữ với archive gốc
-- thả ảnh lên một note để ảnh nằm cạnh và đi theo note; ảnh vẫn kéo chỉnh riêng được
-- ảnh cũng có thể được thả tự do; JPG/PNG/WebP/GIF/AVIF, tối đa 10 MB mỗi file
-- dán link YouTube, youtu.be hoặc Shorts để tạo video card kéo-thả; thumbnail được cache riêng trong archive và player chỉ tải sau khi người xem bấm play
+Stack: Next.js 16 (App Router), React 19, Neon Postgres, Vercel Blob, WebCrypto.
 
-Dữ liệu canvas local nằm trong `.archive-data/` và bị Git ignore. Production lưu archive JSON trong Neon và ảnh trong private Vercel Blob. Share URL dùng slug dễ đọc; editor URL vẫn giữ recovery key trong fragment và phải được giữ riêng tư.
+## License
 
-Sau khi editor recovery link được mở, browser lưu link đó trong `localStorage` và create mode ở `/` hiện mục “saved on this browser”. Cookie editor vẫn là HttpOnly; link có fragment chỉ dùng để cấp lại cookie khi quay lại. Copy hoặc bookmark recovery link trước khi đổi browser hoặc thiết bị.
-
-Archive production của `user_01` dùng cùng share-password flow tại `/a/things-i-couldnt-say-in-time`. Nó đọc 13 published entries từ Neon và là dữ liệu thật để smoke-test view mode.
-
-Editor riêng của archive này dùng recovery link tại `/portal/user_01_personal_archive/claim#key=...`. Chạy `npm run personal-editor-link` để rotate và in một link mới. Migration mặc định chỉ thêm entry chưa tồn tại, nên không ghi đè nội dung đã sửa trong editor; chỉ dùng `--overwrite-entries` khi chủ động muốn khôi phục lại bản local.
-
-## Trạng thái kiểm tra — 06/10/2026
-
-Dependencies đã cài đủ và audit không còn vulnerability đã biết. Production build Next.js 16.3.8 đã thành công. Password gate, 13 entry từ Neon và toàn bộ flow tạo archive → editor recovery link → text dump → share password → reader view đã qua smoke test trên `https://things-in-time.vercel.app`. Test archive tạm đã được xóa sau khi kiểm tra.
-
-## Vercel
-
-Cách ngắn nhất, khi terminal có mạng và đã đăng nhập Vercel:
-
-```sh
-npm run publish
-```
-
-Trước lần deploy đầu tiên, chạy `npm run migrate:production-data` để đưa riêng các entry đã publish lên Neon. Canvas demo và media local chỉ được migrate khi chủ động chạy `npm run migrate:canvas-data`. `npm run publish` cài dependencies, giữ passcode hiện có, chạy production build, đặt env riêng tư rồi deploy.
-
-Hoặc chạy từng bước:
-
-```sh
-npx vercel login
-npx vercel link
-npx vercel env add ARCHIVE_PASSCODE production
-npx vercel env add ARCHIVE_SESSION_SECRET production
-npx vercel env add ARCHIVE_ACCESS production
-npx vercel --prod
-```
-
-Đặt `ARCHIVE_ACCESS=private` (mặc định). Sinh hai giá trị riêng bằng `node -e "console.log(require('crypto').randomBytes(24).toString('base64url'))"`. Giữ chúng trong env của Vercel, không commit. Có thể thay passcode để thu hồi tất cả session cũ. Session hết hạn sau 30 ngày; nút “close the notebook” xóa cookie trên thiết bị hiện tại.
-
-Nếu chủ động muốn bỏ gate và chỉ giữ link unlisted, đặt `ARCHIVE_ACCESS=unlisted`. Khi đó ai có URL cũng đọc được. `noindex` không phải khóa bảo mật. Thiếu secret/passcode trong private mode thì archive luôn đóng.
-
-## Confidential data
-
-Nội dung cá nhân của archive gốc nằm ngoài source code:
-
-```text
-.confidential/
-  entries/
-  photos/
-```
-
-Thư mục này bị Git ignore, bị Vercel ignore và được đặt quyền chỉ tài khoản local hiện tại có thể đọc. Có thể đặt `CONFIDENTIAL_DATA_DIR` thành một absolute path khác nếu muốn lưu confidential data hoàn toàn bên ngoài repository checkout. `source/ARCHIVE_SOURCE_PACK.md` vẫn là canonical private source và cũng không được Git/Vercel upload.
-
-`.archive-data/` là storage riêng cho những archive được tạo qua portal; nó cũng không được commit hoặc upload.
-
-Chạy `npm run rotate-secrets` để thay passcode, session secret và mọi editor recovery key. Giá trị mới không được in ra terminal; passcode và recovery links được lưu trong `.confidential/owner-access.txt` với quyền `600`. Editor recovery link dùng URL fragment, đổi thành HttpOnly cookie một lần rồi chuyển về URL editor sạch.
-
-## Riêng tư
-
-Gate xác thực ở server; nội dung và ảnh không được gửi trước khi nhập đúng passcode. Cookie HttpOnly, SameSite Strict, Secure trên production; session được ký HMAC và đổi passcode sẽ vô hiệu hóa cookie cũ. HTML/ảnh không cache. Metadata và response header luôn có noindex/nofollow; robots.txt chặn crawler. Không sitemap.
-
-Đây là gate dùng chung, không phải account system. Người có passcode có thể lưu/chụp/chia sẻ nội dung. Vercel giữ source và runtime secrets; Neon giữ dữ liệu archive; private Vercel Blob giữ media. Repo phải luôn private và ảnh riêng không được đặt trong `public/`.
-
-## Đổi title
-
-Title ở `app/page.js`, `app/unlock/page.js` và `app/layout.js`. Nội dung entry giữ nguyên cách viết của bạn, bao gồm tiếng Việt và chữ hoa nếu có.
+[AGPL-3.0](LICENSE). If you run a modified version as a service, you must publish your changes under the same license.

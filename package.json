@@ -11,9 +11,6 @@
     "entry": "node scripts/new-entry.mjs",
     "setup": "node scripts/setup-private.mjs",
     "rotate-secrets": "node scripts/rotate-private-secrets.mjs",
-    "migrate:production-data": "node --env-file=.env.local scripts/migrate-production-data.mjs",
-    "migrate:canvas-data": "node --env-file=.env.local scripts/migrate-production-data.mjs --include-canvas --include-personal-media",
-    "personal-editor-link": "node --env-file=.env.local scripts/rotate-personal-editor-link.mjs",
     "publish": "node scripts/publish.mjs"
   },
   "dependencies": {
@@ -25,5 +22,6 @@
     "react-dom": "^19.2.0",
     "react-markdown": "^10.1.0",
     "yaml": "^2.9.1"
-  }
+  },
+  "license": "AGPL-3.0-only"
 }

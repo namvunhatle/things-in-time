@@ -12,5 +12,5 @@ export const viewport = { width: 'device-width', initialScale: 1, themeColor: '#
 
 export default async function RootLayout({ children }) {
   await connection();
-  return <html lang="en"><body><a className="skip-link" href="#main">skip to content</a>{children}<SiteAnalytics /></body></html>;
+  return <html lang="en"><body><a className="skip-link" href="#main">skip to content</a>{children}{process.env.VERCEL && <SiteAnalytics />}</body></html>;
 }

@@ -13,3 +13,7 @@ out/
 .vercel
 .agents/
 skills-lock.json
+# owner-only: notes and scripts for the site's own archive (see lib/personal-archive.js)
+README.private.md
+scripts/migrate-production-data.mjs
+scripts/rotate-personal-editor-link.mjs
