@@ -34,9 +34,16 @@ export default function ArchiveEditor({ archive }) {
   const canvasRef = useRef(null);
   const itemsRef = useRef(items);
   const noteRefs = useRef(new Map());
+  const initialNoteRequested = useRef(false);
   const shareUrl = typeof window === 'undefined' ? `/a/${archive.shareSlug}` : `${window.location.origin}/a/${archive.shareSlug}`;
 
   useEffect(() => { itemsRef.current = items; }, [items]);
+  useEffect(() => {
+    if (!itemsRef.current.length && !initialNoteRequested.current) {
+      initialNoteRequested.current = true;
+      addNote();
+    }
+  }, []);
   useEffect(() => {
     const key = `archive_recovery_${archive.id}`;
     const stored = localStorage.getItem(key) || sessionStorage.getItem(key) || '';
@@ -259,7 +266,7 @@ export default function ArchiveEditor({ archive }) {
         {status && <span className="editor-status" role="status">{status}</span>}
       </div>
     </header>
-    <div ref={canvasRef} className={`archive-canvas editor-canvas${dragging ? ' is-dragging' : ''}${items.length ? '' : ' is-empty'}`} style={{ aspectRatio: `${archive.canvas.width} / ${archive.canvas.height}` }} onDragOver={event => event.preventDefault()} onDrop={dropOnCanvas}>
+    <div ref={canvasRef} className={`archive-canvas editor-canvas${dragging ? ' is-dragging' : ''}`} style={{ aspectRatio: `${archive.canvas.width} / ${archive.canvas.height}` }} onDragOver={event => event.preventDefault()} onDrop={dropOnCanvas}>
       {items.map(item => item.type === 'note' ? <article
         key={item.id}
         className={`canvas-note canvas-entry${dropTarget === item.id ? ' is-drop-target' : ''}`}

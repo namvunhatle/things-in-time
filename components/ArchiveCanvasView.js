@@ -55,7 +55,7 @@ function YoutubePlayer({ item, archive }) {
 export default function ArchiveCanvasView({ archive }) {
   return <div className="archive-canvas viewer-canvas wysiwyg-canvas" style={{ aspectRatio: `${archive.canvas.width} / ${archive.canvas.height}` }}>
     {!archive.items.length && <p className="viewer-empty">nothing here yet.</p>}
-    {archive.items.map(item => item.type === 'note' ? <article
+    {archive.items.map(item => item.type === 'note' ? item.content?.trim() ? <article
       key={item.id}
       className="canvas-note canvas-entry canvas-note-view"
       style={itemStyle(item, archive)}
@@ -66,7 +66,7 @@ export default function ArchiveCanvasView({ archive }) {
         {item.time && <span>{timeLabel(item.time)}</span>}
       </div>
       <div className="note-content">{paragraphs(item.content)}</div>
-    </article> : item.type === 'youtube' ? <YoutubePlayer key={item.id} item={item} archive={archive} /> : <figure
+    </article> : null : item.type === 'youtube' ? <YoutubePlayer key={item.id} item={item} archive={archive} /> : <figure
       key={item.id}
       className="canvas-item sticky-photo sticky-photo-view"
       style={itemStyle(item, archive)}
