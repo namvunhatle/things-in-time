@@ -25,6 +25,7 @@ function timeLabel(value) {
 export default function ArchiveEditor({ archive }) {
   const [items, setItems] = useState(archive.items);
   const [title, setTitle] = useState(archive.title);
+  const [subtitle, setSubtitle] = useState(archive.subtitle || '');
   const [status, setStatus] = useState('saved');
   const [dragging, setDragging] = useState(null);
   const [dropTarget, setDropTarget] = useState(null);
@@ -68,13 +69,13 @@ export default function ArchiveEditor({ archive }) {
     });
   }
 
-  async function save(nextItems = itemsRef.current, nextTitle = title) {
+  async function save(nextItems = itemsRef.current, nextTitle = title, nextSubtitle = subtitle) {
     setStatus('saving…');
     try {
       const response = await fetch(`/api/archives/${archive.id}/layout`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: nextTitle, items: nextItems }),
+        body: JSON.stringify({ title: nextTitle, subtitle: nextSubtitle, items: nextItems }),
       });
       if (!response.ok) throw new Error('save failed');
       setStatus('saved');
@@ -229,7 +230,8 @@ export default function ArchiveEditor({ archive }) {
     <header className="editor-bar">
       <div>
         <p className="eyebrow">archive editor</p>
-        <input className="editor-title" value={title} maxLength={80} aria-label="archive name" onChange={event => setTitle(event.target.value)} onBlur={() => save(itemsRef.current, title)} />
+        <input className="editor-title" value={title} maxLength={80} aria-label="archive name" onChange={event => setTitle(event.target.value)} onBlur={() => save(itemsRef.current, title, subtitle)} />
+        <textarea className="editor-subtitle" value={subtitle} maxLength={400} aria-label="archive subtitle" placeholder="add a subtitle. line breaks are kept." onChange={event => setSubtitle(event.target.value)} onBlur={() => save(itemsRef.current, title, subtitle)} />
       </div>
       <div className="editor-actions">
         <span>{status}</span>

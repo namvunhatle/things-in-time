@@ -62,12 +62,13 @@ async function seedPersonalArchive(sql) {
     shareSlug,
     ownerId: 'user_01',
     presentation: 'timeline',
-    title: 'things i couldn’t say in time',
+    title: previous?.title || 'things i couldn’t say in time',
+    subtitle: previous?.subtitle || 'things i loved,\nthings i didn’t understand soon enough,\nand things i still carry.',
     createdAt: previous?.createdAt || new Date().toISOString(),
     password,
     editorKeyHash: previous?.editorKeyHash || createHash('sha256').update(randomBytes(32)).digest('base64url'),
     canvas: { width: 1200, height: 900 },
-    items: [],
+    items: previous?.items || [],
   };
   await sql`INSERT INTO archives (id, share_slug, document)
     VALUES (${id}, ${shareSlug}, ${JSON.stringify(document)}::jsonb)

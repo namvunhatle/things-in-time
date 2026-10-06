@@ -13,6 +13,7 @@
     "rotate-secrets": "node scripts/rotate-private-secrets.mjs",
     "migrate:production-data": "node --env-file=.env.local scripts/migrate-production-data.mjs",
     "migrate:canvas-data": "node --env-file=.env.local scripts/migrate-production-data.mjs --include-canvas --include-personal-media",
+    "personal-editor-link": "node --env-file=.env.local scripts/rotate-personal-editor-link.mjs",
     "publish": "node scripts/publish.mjs"
   },
   "dependencies": {

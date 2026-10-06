@@ -1,7 +1,9 @@
 import { notFound } from 'next/navigation';
 import { cookies } from 'next/headers';
 import ArchiveEditor from '../../../components/ArchiveEditor';
+import PersonalArchiveEditor from '../../../components/PersonalArchiveEditor';
 import { editorCookieName, hasEditorSession, readArchive } from '../../../lib/archive-store';
+import { categories, readEntries } from '../../../lib/entries';
 
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'archive editor' };
@@ -13,7 +15,14 @@ export default async function ArchiveEditorPage({ params }) {
   const editorToken = (await cookies()).get(editorCookieName(archiveId))?.value;
   if (!hasEditorSession(archive, editorToken)) notFound();
 
+  if (archive.presentation === 'timeline') {
+    const entries = await readEntries('all', archive.ownerId);
+    return <main id="main" className="personal-editor-shell">
+      <PersonalArchiveEditor archive={{ id: archive.id, shareSlug: archive.shareSlug || archive.id, title: archive.title, subtitle: archive.subtitle || '' }} entries={entries} categories={categories} />
+    </main>;
+  }
+
   return <main id="main" className="editor-shell">
-    <ArchiveEditor archive={{ id: archive.id, shareSlug: archive.shareSlug || archive.id, title: archive.title, canvas: archive.canvas, items: archive.items }} />
+    <ArchiveEditor archive={{ id: archive.id, shareSlug: archive.shareSlug || archive.id, title: archive.title, subtitle: archive.subtitle || '', canvas: archive.canvas, items: archive.items }} />
   </main>;
 }

@@ -26,8 +26,8 @@ export default async function SharedArchivePage({ params, searchParams }) {
     const entries = await readEntries(category, archive.ownerId);
     return <main id="main" className="notebook">
       <header className="opening">
-        <h1>things i couldn’t<br className="desktop-break" /> say in time</h1>
-        <p className="intro">things i loved,<br />things i didn’t understand soon enough,<br />and things i still carry.</p>
+        <h1>{archive.title}</h1>
+        {archive.subtitle && <p className="intro">{archive.subtitle.split('\n').map((line, index) => <span key={index}>{line}{index < archive.subtitle.split('\n').length - 1 && <br />}</span>)}</p>}
       </header>
       <nav className="filters" aria-label="filter the archive">
         <a href={`/a/${archiveId}#entries`} aria-current={category === 'all' ? 'page' : undefined}>all entries</a>
@@ -46,6 +46,7 @@ export default async function SharedArchivePage({ params, searchParams }) {
   return <main id="main" className="notebook shared-archive">
     <header className="shared-opening">
       <h1>{archive.title}</h1>
+      {archive.subtitle && <p className="intro">{archive.subtitle}</p>}
     </header>
     <nav className="shared-filter" aria-label="archive view"><span>all entries</span></nav>
     <ArchiveCanvasView archive={{ id: archive.id, canvas: archive.canvas, items: archive.items }} />
