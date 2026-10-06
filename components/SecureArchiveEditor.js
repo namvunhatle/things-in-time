@@ -10,6 +10,39 @@ const categories = {
   all: 'all', understood: 'things i understood too late', miss: 'things i miss', songs: 'songs', home: 'our home', unsaid: 'things i never said',
 };
 
+// Shown once a legacy archive has been encrypted: its old plaintext copy still sits on the server
+// until the owner removes it. The server refuses if the encrypted copy has fewer entries.
+function PlaintextCleanup({ archiveId, entryCount }) {
+  const [state, setState] = useState('pending');
+  const [message, setMessage] = useState('');
+
+  async function purge() {
+    if (!window.confirm('remove the old unencrypted copy from the server? this cannot be undone. your encrypted archive stays as it is.')) return;
+    setState('working');
+    try {
+      const response = await fetch(`/api/archives/${archiveId}/purge-plaintext`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ encryptedEntryCount: entryCount }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || 'cleanup failed.');
+      setState('done');
+      setMessage(`removed ${result.removedEntries} old entries${result.removedMedia ? ` and ${result.removedMedia} photos` : ''}.`);
+    } catch (error) {
+      setState('pending');
+      setMessage(error.message || 'cleanup failed.');
+    }
+  }
+
+  if (state === 'done') return <section className="migration-card" role="status"><p>{message} only the encrypted archive remains.</p></section>;
+  return <section className="migration-card">
+    <p>an unencrypted copy of your old entries is still on the server. remove it so only the encrypted archive remains.</p>
+    <button type="button" disabled={state === 'working'} onClick={purge}>{state === 'working' ? 'removing…' : 'remove the old copy'}</button>
+    {message && <p className="portal-error" role="alert">{message}</p>}
+  </section>;
+}
+
 export default function SecureArchiveEditor({ archive }) {
   const [opened, setOpened] = useState(null);
   const [error, setError] = useState('decrypting your archive…');
@@ -62,7 +95,10 @@ export default function SecureArchiveEditor({ archive }) {
   };
   const identity = { id: archive.id, shareSlug: archive.shareSlug, shareUrl: opened.shareUrl, ...opened.document };
   if (opened.document.presentation === 'timeline') {
-    return <PersonalArchiveEditor archive={identity} entries={opened.document.entries || []} categories={categories} secure={secure} />;
+    return <>
+      {archive.plaintextCleanupPending && <PlaintextCleanup archiveId={archive.id} entryCount={(opened.document.entries || []).length} />}
+      <PersonalArchiveEditor archive={identity} entries={opened.document.entries || []} categories={categories} secure={secure} />
+    </>;
   }
   return <ArchiveEditor archive={identity} secure={secure} />;
 }

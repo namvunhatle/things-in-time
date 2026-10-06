@@ -128,6 +128,13 @@ if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL is missing');
 
 await ensureDatabaseSchema();
 const sql = database();
+// Once the personal archive is encrypted, this script would overwrite it with a plaintext copy and
+// re-insert the plaintext entries the owner removed. Never run it against an encrypted archive.
+const [personal] = await sql`SELECT document->>'version' AS version FROM archives WHERE id = 'user_01_personal_archive' LIMIT 1`;
+if (personal?.version === '2') {
+  console.error('The personal archive is encrypted. This script writes plaintext and would overwrite it — refusing to run.');
+  process.exit(1);
+}
 const entries = await migratePublishedEntries(sql);
 await seedPersonalArchive(sql);
 let migrated = { archives: 0, media: 0 };

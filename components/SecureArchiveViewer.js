@@ -3,7 +3,8 @@
 import { useEffect, useState } from 'react';
 import ArchiveCanvasView from './ArchiveCanvasView';
 import Entry from './Entry';
-import { openWithViewerKey, viewerCredentials } from '../lib/archive-crypto';
+import { decryptLinkSecret, openWithViewerKey, viewerCredentials } from '../lib/archive-crypto';
+import { loadArchiveKey } from '../lib/key-vault';
 
 const categories = {
   all: 'all', understood: 'things i understood too late', miss: 'things i miss', songs: 'songs', home: 'our home', unsaid: 'things i never said',
@@ -17,10 +18,35 @@ export default function SecureArchiveViewer({ gate }) {
   const [busy, setBusy] = useState(false);
   const [linkSecret, setLinkSecret] = useState(null);
 
+  const [ownsArchive, setOwnsArchive] = useState(false);
+
   // The link secret lives in the #fragment, which browsers never send to the server.
+  // Opened without it (an old bookmark, a trimmed link)? If this browser holds the archive's key,
+  // it is the owner's: rebuild the full link instead of turning them away.
   useEffect(() => {
-    setLinkSecret(window.location.hash.slice(1));
-  }, []);
+    let active = true;
+    async function readLink() {
+      const fromHash = window.location.hash.slice(1);
+      if (/^[A-Za-z0-9_-]{22}$/.test(fromHash)) {
+        setLinkSecret(fromHash);
+        return;
+      }
+      const dataKey = gate.linkSecretWrap ? await loadArchiveKey(gate.id) : null;
+      if (dataKey) {
+        try {
+          const recovered = await decryptLinkSecret(gate.id, dataKey, gate.linkSecretWrap);
+          window.history.replaceState(null, '', `${window.location.pathname}#${recovered}`);
+          if (active) setLinkSecret(recovered);
+          return;
+        } catch {
+          if (active) setOwnsArchive(true);
+        }
+      }
+      if (active) setLinkSecret(fromHash);
+    }
+    readLink();
+    return () => { active = false; };
+  }, [gate]);
 
   async function unlock(event) {
     event.preventDefault();
@@ -50,6 +76,7 @@ export default function SecureArchiveViewer({ gate }) {
     <p className="eyebrow">an encrypted archive</p>
     <h1>this link is incomplete.</h1>
     <p>ask the person who shared it for the full link. the part after # opens the archive and never reaches our server.</p>
+    <p>{ownsArchive ? 'this browser’s key no longer matches. open the editor with your recovery key, then copy the share link there.' : 'if this is your archive, open your editor and copy the share link from there.'} <a href={`/portal/${gate.id}`}>open the editor</a></p>
   </main>;
 
   if (!opened) return <main id="main" className="gate">
