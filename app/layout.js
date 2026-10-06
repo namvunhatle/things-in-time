@@ -1,4 +1,5 @@
 import './globals.css';
+import { connection } from 'next/server';
 
 export const metadata = {
   title: 'things i couldn’t say in time',
@@ -8,6 +9,7 @@ export const metadata = {
 };
 export const viewport = { width: 'device-width', initialScale: 1, themeColor: '#faf9f6' };
 
-export default function RootLayout({ children }) {
+export default async function RootLayout({ children }) {
+  await connection();
   return <html lang="en"><body><a className="skip-link" href="#main">skip to content</a>{children}</body></html>;
 }

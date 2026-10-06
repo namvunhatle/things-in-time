@@ -1,5 +1,5 @@
 import Markdown from 'react-markdown';
-import { dateLabel, timeLabel } from '../lib/entries';
+import { dateLabel, timeLabel } from '../lib/entry-format';
 
 function safeImage(src) { return /^\/media\/[a-zA-Z0-9][a-zA-Z0-9._-]*\.(?:jpe?g|png|webp|gif|avif)$/i.test(src || ''); }
 export default function Entry({ entry }) {

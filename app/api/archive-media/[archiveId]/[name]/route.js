@@ -21,7 +21,7 @@ export async function GET(request, { params }) {
   if (!data) return new Response(null, { status: 404 });
   const extension = name.split('.').pop().toLowerCase();
   return new Response(data.body, { headers: {
-    'Content-Type': data.contentType || contentTypes[extension] || 'application/octet-stream',
+    'Content-Type': archive.version === 2 ? 'application/octet-stream' : (data.contentType || contentTypes[extension] || 'application/octet-stream'),
     'Cache-Control': 'private, no-store',
     'X-Content-Type-Options': 'nosniff',
     'X-Robots-Tag': 'noindex, noimageindex',

@@ -1,5 +1,5 @@
 import { cookies } from 'next/headers';
-import { addArchiveImage, editorCookieName, hasEditorSession, readArchive } from '../../../../../lib/archive-store';
+import { addArchiveImage, addEncryptedArchiveMedia, editorCookieName, hasEditorSession, readArchive } from '../../../../../lib/archive-store';
 import { trustedRequestBase } from '../../../../../lib/request-origin';
 
 export const runtime = 'nodejs';
@@ -16,6 +16,10 @@ export async function POST(request, { params }) {
     if (!hasEditorSession(archive, editorToken)) return Response.json({ error: 'editor session denied.' }, { status: 403 });
     const file = form.get('file');
     if (!(file instanceof File)) return Response.json({ error: 'choose an image.' }, { status: 400 });
+    if (archive.version === 2) {
+      const fileName = await addEncryptedArchiveMedia(archive, file, String(form.get('fileName') || ''));
+      return Response.json({ fileName }, { status: 201, headers: { 'Cache-Control': 'private, no-store' } });
+    }
     const item = await addArchiveImage(archive, file, {
       x: form.get('x'),
       y: form.get('y'),

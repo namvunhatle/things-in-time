@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import EncryptedImage from './EncryptedImage';
 
 function dateLabel(value) {
   return new Intl.DateTimeFormat('en-US', {
@@ -32,7 +33,7 @@ function itemStyle(item, archive) {
   };
 }
 
-function YoutubePlayer({ item, archive }) {
+function YoutubePlayer({ item, archive, encrypted = false }) {
   const [playing, setPlaying] = useState(false);
   return <div className="canvas-item youtube-sticky youtube-sticky-view" style={itemStyle(item, archive)}>
     <div className="youtube-frame">
@@ -43,7 +44,8 @@ function YoutubePlayer({ item, archive }) {
         referrerPolicy="strict-origin-when-cross-origin"
         allowFullScreen
       /> : <button className="youtube-placeholder" type="button" onClick={() => setPlaying(true)} aria-label="play YouTube video in this archive">
-        {item.thumbnailFileName && <img className="youtube-thumbnail" src={`/api/archive-media/${archive.id}/${item.thumbnailFileName}`} alt="" loading="lazy" decoding="async" />}
+        {item.thumbnailFileName && !encrypted && <img className="youtube-thumbnail" src={`/api/archive-media/${archive.id}/${item.thumbnailFileName}`} alt="" loading="lazy" decoding="async" />}
+        {encrypted && <img className="youtube-thumbnail" src={`https://i.ytimg.com/vi/${item.videoId}/hqdefault.jpg`} alt="" loading="lazy" decoding="async" referrerPolicy="no-referrer" />}
         <span className="youtube-play" aria-hidden="true">▶</span>
         <span>play here</span>
       </button>}
@@ -52,7 +54,7 @@ function YoutubePlayer({ item, archive }) {
   </div>;
 }
 
-export default function ArchiveCanvasView({ archive }) {
+export default function ArchiveCanvasView({ archive, dataKey = null }) {
   return <div className="archive-canvas viewer-canvas wysiwyg-canvas" style={{ aspectRatio: `${archive.canvas.width} / ${archive.canvas.height}` }}>
     {!archive.items.length && <p className="viewer-empty">nothing here yet.</p>}
     {archive.items.map(item => item.type === 'note' ? item.content?.trim() ? <article
@@ -66,12 +68,12 @@ export default function ArchiveCanvasView({ archive }) {
         {item.time && <span>{timeLabel(item.time)}</span>}
       </div>
       <div className="note-content">{paragraphs(item.content)}</div>
-    </article> : null : item.type === 'youtube' ? <YoutubePlayer key={item.id} item={item} archive={archive} /> : <figure
+    </article> : null : item.type === 'youtube' ? <YoutubePlayer key={item.id} item={item} archive={archive} encrypted={Boolean(dataKey)} /> : <figure
       key={item.id}
       className="canvas-item sticky-photo sticky-photo-view"
       style={itemStyle(item, archive)}
     >
-      <img src={`/api/archive-media/${archive.id}/${item.fileName}`} alt={item.alt || ''} loading="lazy" decoding="async" />
+      {dataKey ? <EncryptedImage archiveId={archive.id} fileName={item.fileName} dataKey={dataKey} contentType={item.contentType} alt={item.alt || ''} loading="lazy" decoding="async" /> : <img src={`/api/archive-media/${archive.id}/${item.fileName}`} alt={item.alt || ''} loading="lazy" decoding="async" />}
     </figure>)}
   </div>;
 }

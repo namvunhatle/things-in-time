@@ -1,12 +1,14 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { randomToken } from '../lib/archive-crypto';
+import LegacyEncryptionMigration from './LegacyEncryptionMigration';
 
 function today() {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' }).format(new Date());
 }
 
-function EntryForm({ archiveId, entry, categories, onSaved, isNew = false }) {
+function EntryForm({ archiveId, entry, categories, onSaved, isNew = false, secureCommit = null }) {
   const [value, setValue] = useState(entry);
   const [status, setStatus] = useState('');
 
@@ -36,6 +38,13 @@ function EntryForm({ archiveId, entry, categories, onSaved, isNew = false }) {
       ? `/api/archives/${archiveId}/entries`
       : `/api/archives/${archiveId}/entries/${entry.id}`;
     try {
+      if (secureCommit) {
+        const saved = await secureCommit(value, isNew, entry.id);
+        setValue(saved);
+        setStatus('');
+        if (isNew) setValue({ title: '', content: '', date: today(), time: '', category: 'unsaid', song: null });
+        return;
+      }
       const response = await fetch(endpoint, {
         method: isNew ? 'POST' : 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -70,7 +79,7 @@ function EntryForm({ archiveId, entry, categories, onSaved, isNew = false }) {
   </form>;
 }
 
-export default function PersonalArchiveEditor({ archive, entries: initialEntries, categories }) {
+export default function PersonalArchiveEditor({ archive, entries: initialEntries, categories, secure = null }) {
   const [title, setTitle] = useState(archive.title);
   const [subtitle, setSubtitle] = useState(archive.subtitle);
   const [entries, setEntries] = useState(initialEntries);
@@ -88,6 +97,11 @@ export default function PersonalArchiveEditor({ archive, entries: initialEntries
   async function saveSettings() {
     setStatus('saving…');
     try {
+      if (secure) {
+        await secure.save({ presentation: 'timeline', title, subtitle, entries });
+        setStatus('');
+        return;
+      }
       const response = await fetch(`/api/archives/${archive.id}/layout`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -119,6 +133,32 @@ export default function PersonalArchiveEditor({ archive, entries: initialEntries
     setStatus('entry added');
   }
 
+  async function secureCommit(value, isNew, existingId) {
+    const song = value.song ? {
+      title: String(value.song.title || '').trim().slice(0, 200),
+      artist: String(value.song.artist || '').trim().slice(0, 200),
+      ...(value.song.url ? { url: String(value.song.url).trim().slice(0, 1000) } : {}),
+    } : null;
+    if (!String(value.content || '').trim()) throw new Error('text dump cannot be empty');
+    if (song && (!song.title || !song.artist)) throw new Error('song title and artist are required');
+    const saved = {
+      ...value,
+      id: existingId || `entry_${randomToken(9)}`,
+      title: String(value.title || '').trim().slice(0, 200),
+      content: String(value.content || '').replace(/\r\n?/g, '\n').slice(0, 20000),
+      category: song ? 'songs' : value.category,
+      kind: song ? 'song' : 'dump',
+      song,
+      lang: 'en',
+      draft: false,
+      assistant_assisted: Boolean(value.assistant_assisted),
+    };
+    const next = isNew ? [saved, ...entries] : entries.map(candidate => candidate.id === saved.id ? saved : candidate);
+    setEntries(next);
+    await secure.save({ presentation: 'timeline', title, subtitle, entries: next });
+    return saved;
+  }
+
   return <>
     <header className="personal-editor-header">
       <p className="eyebrow">editor</p>
@@ -131,15 +171,16 @@ export default function PersonalArchiveEditor({ archive, entries: initialEntries
         {status && <span role="status">{status}</span>}
       </div>
     </header>
+    {!secure && <LegacyEncryptionMigration archive={archive} document={{ presentation: 'timeline', title, subtitle, entries }} />}
     <details className="personal-composer">
       <summary>new entry</summary>
-      <EntryForm archiveId={archive.id} entry={{ title: '', content: '', date: today(), time: '', category: 'unsaid', song: null }} categories={categories} onSaved={addEntry} isNew />
+      <EntryForm archiveId={archive.id} entry={{ title: '', content: '', date: today(), time: '', category: 'unsaid', song: null }} categories={categories} onSaved={addEntry} isNew secureCommit={secure ? secureCommit : null} />
     </details>
     <section className="personal-entry-list" aria-label="published entries">
       <p className="eyebrow">{entries.length} published entries</p>
       {entries.map(entry => <details className="personal-entry" key={entry.id}>
         <summary><time dateTime={`${entry.date}${entry.time ? `T${entry.time}` : ''}`}>{entry.date}</time><span>{entry.song?.title || entry.title || entry.content.split('\n')[0]}</span></summary>
-        <EntryForm archiveId={archive.id} entry={entry} categories={categories} onSaved={replaceEntry} />
+        <EntryForm archiveId={archive.id} entry={entry} categories={categories} onSaved={replaceEntry} secureCommit={secure ? secureCommit : null} />
       </details>)}
     </section>
   </>;

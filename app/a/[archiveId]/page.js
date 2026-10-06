@@ -1,7 +1,8 @@
 import { cookies } from 'next/headers';
 import { notFound, redirect } from 'next/navigation';
 import ArchiveCanvasView from '../../../components/ArchiveCanvasView';
-import { hasViewerSession, readArchive, viewerCookieName } from '../../../lib/archive-store';
+import SecureArchiveViewer from '../../../components/SecureArchiveViewer';
+import { encryptedArchiveClientView, hasViewerSession, readArchive, viewerCookieName } from '../../../lib/archive-store';
 import Entry from '../../../components/Entry';
 import { categories, readEntries } from '../../../lib/entries';
 
@@ -10,13 +11,14 @@ export const dynamic = 'force-dynamic';
 export async function generateMetadata({ params }) {
   const { archiveId } = await params;
   const archive = await readArchive(archiveId);
-  return { title: archive?.title || 'private archive' };
+  return { title: archive?.version === 2 ? 'private archive' : (archive?.title || 'private archive') };
 }
 
 export default async function SharedArchivePage({ params, searchParams }) {
   const { archiveId } = await params;
   const archive = await readArchive(archiveId);
   if (!archive) notFound();
+  if (archive.version === 2) return <SecureArchiveViewer archive={encryptedArchiveClientView(archive)} />;
   const token = (await cookies()).get(viewerCookieName(archiveId))?.value;
   if (!hasViewerSession(archiveId, token)) redirect(`/a/${archiveId}/unlock`);
 

@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import EncryptedImage from './EncryptedImage';
+import { randomToken } from '../lib/archive-crypto';
 
 const imageUrl = (archiveId, fileName) => `/api/archive-media/${archiveId}/${fileName}`;
 const itemStyle = (item, archive) => ({
@@ -22,7 +24,27 @@ function timeLabel(value) {
   return `${hour % 12 || 12}:${String(minute).padStart(2, '0')}${hour < 12 ? 'am' : 'pm'}`;
 }
 
-export default function ArchiveEditor({ archive }) {
+function newNote(count) {
+  const now = new Date();
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ho_Chi_Minh', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(now);
+  const value = type => parts.find(part => part.type === type)?.value;
+  return { id: randomToken(12), type: 'note', date: `${value('year')}-${value('month')}-${value('day')}`, time: `${value('hour')}:${value('minute')}`, content: '', x: 0, y: Math.min(760, 62 + count * 260), width: 728 };
+}
+
+function youtubeVideoId(value) {
+  try {
+    const url = new URL(String(value || '').trim());
+    const host = url.hostname.toLowerCase().replace(/^www\./, '').replace(/^m\./, '');
+    let id = '';
+    if (host === 'youtu.be') id = url.pathname.split('/').filter(Boolean)[0] || '';
+    if (host === 'youtube.com') id = url.pathname === '/watch' ? (url.searchParams.get('v') || '') : (/^\/(?:shorts|embed)\//.test(url.pathname) ? (url.pathname.split('/')[2] || '') : '');
+    return /^[a-zA-Z0-9_-]{11}$/.test(id) ? id : '';
+  } catch {
+    return '';
+  }
+}
+
+export default function ArchiveEditor({ archive, secure = null }) {
   const [items, setItems] = useState(archive.items);
   const [title, setTitle] = useState(archive.title);
   const [subtitle, setSubtitle] = useState(archive.subtitle || '');
@@ -79,6 +101,11 @@ export default function ArchiveEditor({ archive }) {
   async function save(nextItems = itemsRef.current, nextTitle = title, nextSubtitle = subtitle) {
     setStatus('saving…');
     try {
+      if (secure) {
+        await secure.save({ presentation: 'canvas', title: nextTitle, subtitle: nextSubtitle, canvas: archive.canvas, items: nextItems });
+        setStatus('');
+        return;
+      }
       const response = await fetch(`/api/archives/${archive.id}/layout`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -95,6 +122,14 @@ export default function ArchiveEditor({ archive }) {
     const count = itemsRef.current.filter(item => item.type === 'note').length;
     setStatus('adding note…');
     try {
+      if (secure) {
+        const item = newNote(count);
+        const next = [...itemsRef.current, item];
+        replaceItems(next);
+        await save(next);
+        requestAnimationFrame(() => noteRefs.current.get(item.id)?.focus());
+        return;
+      }
       const response = await fetch(`/api/archives/${archive.id}/notes`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -116,6 +151,25 @@ export default function ArchiveEditor({ archive }) {
     setStatus('uploading…');
     let next = itemsRef.current;
     for (const [index, file] of images.entries()) {
+      if (file.size < 1 || file.size > 10 * 1024 * 1024) {
+        setStatus('image must be smaller than 10 MB');
+        return;
+      }
+      if (secure) {
+        try {
+          const fileName = await secure.upload(file);
+          next = [...next, {
+            id: randomToken(12), type: 'image', fileName, contentType: file.type,
+            x: Math.max(0, Math.min(920, point.x + index * 22)), y: Math.max(0, Math.min(820, point.y + index * 22)), width: 280, alt: '', attachedTo,
+          }];
+          replaceItems(next);
+          await save(next);
+          continue;
+        } catch {
+          setStatus('upload failed');
+          return;
+        }
+      }
       const data = new FormData();
       data.set('file', file);
       data.set('x', String(point.x + index * 22));
@@ -140,6 +194,17 @@ export default function ArchiveEditor({ archive }) {
     const count = itemsRef.current.filter(item => item.type === 'youtube').length;
     setStatus('adding video…');
     try {
+      if (secure) {
+        const videoId = youtubeVideoId(youtubeUrl);
+        if (!videoId) throw new Error('paste a valid YouTube link');
+        const item = { id: randomToken(12), type: 'youtube', videoId, x: Math.max(0, 760 - count * 24), y: Math.min(660, 90 + count * 230), width: 360 };
+        const next = [...itemsRef.current, item];
+        replaceItems(next);
+        await save(next);
+        setYoutubeUrl('');
+        setStatus('');
+        return;
+      }
       const response = await fetch(`/api/archives/${archive.id}/youtube`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -285,12 +350,13 @@ export default function ArchiveEditor({ archive }) {
         </div>
       </article> : item.type === 'youtube' ? <div key={item.id} className="canvas-item youtube-sticky" style={itemStyle(item, archive)} onPointerDown={event => beginMove(event, item)}>
         <div className="youtube-frame youtube-placeholder" aria-label="YouTube video preview">
-          {item.thumbnailFileName && <img className="youtube-thumbnail" src={imageUrl(archive.id, item.thumbnailFileName)} alt="" draggable="false" />}
+          {item.thumbnailFileName && !secure && <img className="youtube-thumbnail" src={imageUrl(archive.id, item.thumbnailFileName)} alt="" draggable="false" />}
+          {secure && <img className="youtube-thumbnail" src={`https://i.ytimg.com/vi/${item.videoId}/hqdefault.jpg`} alt="" draggable="false" referrerPolicy="no-referrer" />}
           <span className="youtube-play" aria-hidden="true">▶</span>
         </div>
         <div className="youtube-card-label"><span>{item.title || 'youtube'}</span></div>
       </div> : <div key={item.id} className="canvas-item sticky-photo" style={itemStyle(item, archive)} onPointerDown={event => beginMove(event, item)}>
-        <img src={imageUrl(archive.id, item.fileName)} alt={item.alt || ''} draggable="false" />
+        {secure ? <EncryptedImage archiveId={archive.id} fileName={item.fileName} dataKey={secure.dataKey} contentType={item.contentType} alt={item.alt || ''} draggable="false" /> : <img src={imageUrl(archive.id, item.fileName)} alt={item.alt || ''} draggable="false" />}
       </div>)}
     </div>
   </>;

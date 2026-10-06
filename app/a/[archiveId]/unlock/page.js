@@ -10,6 +10,7 @@ export default async function SharedUnlockPage({ params, searchParams }) {
   const { error } = await searchParams;
   const archive = await readArchive(archiveId);
   if (!archive) notFound();
+  if (archive.version === 2) redirect(`/a/${archiveId}`);
   const token = (await cookies()).get(viewerCookieName(archiveId))?.value;
   if (hasViewerSession(archiveId, token)) redirect(`/a/${archiveId}`);
 

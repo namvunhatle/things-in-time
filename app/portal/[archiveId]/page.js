@@ -2,7 +2,8 @@ import { notFound, redirect } from 'next/navigation';
 import { cookies } from 'next/headers';
 import ArchiveEditor from '../../../components/ArchiveEditor';
 import PersonalArchiveEditor from '../../../components/PersonalArchiveEditor';
-import { editorCookieName, hasEditorSession, readArchive } from '../../../lib/archive-store';
+import SecureArchiveEditor from '../../../components/SecureArchiveEditor';
+import { editorCookieName, encryptedArchiveClientView, hasEditorSession, readArchive } from '../../../lib/archive-store';
 import { categories, readEntries } from '../../../lib/entries';
 
 export const dynamic = 'force-dynamic';
@@ -14,6 +15,10 @@ export default async function ArchiveEditorPage({ params }) {
   if (!archive) notFound();
   const editorToken = (await cookies()).get(editorCookieName(archiveId))?.value;
   if (!hasEditorSession(archive, editorToken)) redirect(`/portal/${archiveId}/claim`);
+
+  if (archive.version === 2) {
+    return <main id="main" className="editor-shell"><SecureArchiveEditor archive={encryptedArchiveClientView(archive)} /></main>;
+  }
 
   if (archive.presentation === 'timeline') {
     const entries = await readEntries('all', archive.ownerId);
