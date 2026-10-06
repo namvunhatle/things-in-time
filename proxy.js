@@ -4,7 +4,7 @@ import { COOKIE, hasAccess } from './lib/auth';
 export function proxy(request) {
   const path = request.nextUrl.pathname;
   const publicPath = path.startsWith('/_next/static/') || path.startsWith('/_next/webpack-hmr') ||
-    path === '/portal' || path.startsWith('/portal/') || path.startsWith('/a/') ||
+    path === '/' || path === '/portal' || path.startsWith('/portal/') || path.startsWith('/a/') ||
     path === '/api/archives' || path.startsWith('/api/archives/') ||
     path.startsWith('/api/archive-media/') || path.startsWith('/api/share/') ||
     ['/unlock', '/api/unlock', '/favicon.svg', '/robots.txt'].includes(path);

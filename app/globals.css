@@ -46,3 +46,7 @@
 /* Link-based return path, stored only in this browser. */
 .recent-archives{margin-top:54px;max-width:620px}.recent-archives .eyebrow{margin-bottom:10px}.recent-archives ul{list-style:none;margin:0;padding:0;border-top:1px solid var(--rule)}.recent-archives li{display:flex;align-items:center;justify-content:space-between;gap:24px;padding:17px 0;border-bottom:1px solid var(--rule)}.recent-archives li>span{font-size:18px;line-height:1.4}.recent-archives li>div{display:flex;gap:16px;font:11px/1.5 var(--mono);white-space:nowrap}
 @media(max-width:699px){.recent-archives{margin-top:44px}.recent-archives li{align-items:flex-start}.recent-archives li>div{flex-direction:column;gap:8px}}
+
+/* Product landing defaults to creation, with viewing as an explicit second mode. */
+.product-home{padding-top:54px}.portal-modes{display:flex;gap:26px;border-bottom:1px solid var(--rule);max-width:520px}.portal-modes button{border:0;background:transparent;padding:12px 0;font:13px/1.6 var(--mono);color:var(--muted)}.portal-modes button[aria-current]{color:var(--ink);text-decoration:underline;text-underline-offset:7px}.product-home .portal-intro{margin-top:64px}.view-archive-form{margin-top:58px}.portal-note a{color:var(--ink)}
+@media(max-width:699px){.product-home{padding-top:34px}.product-home .portal-intro{margin-top:48px}}

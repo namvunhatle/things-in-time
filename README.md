@@ -54,7 +54,7 @@ Mở http://127.0.0.1:3000. `npm run build` kiểm tra nội dung và build prod
 
 ## Portal và archive canvas
 
-Mở `http://127.0.0.1:3000/portal` để tạo một archive mới. Mỗi archive có:
+Mở `/` để vào product landing. Mặc định là **create**; chuyển sang **view** để dán share link. `/portal` redirect về `/`. Mỗi archive có:
 
 - editor URL riêng chứa editor key; giữ link này riêng tư
 - share URL chỉ để xem
@@ -66,7 +66,9 @@ Mở `http://127.0.0.1:3000/portal` để tạo một archive mới. Mỗi archi
 
 Dữ liệu canvas local nằm trong `.archive-data/` và bị Git ignore. Production lưu archive JSON trong Neon và ảnh trong private Vercel Blob. Share URL dùng slug dễ đọc; editor URL vẫn giữ recovery key trong fragment và phải được giữ riêng tư.
 
-Sau khi editor recovery link được mở, browser lưu link đó trong `localStorage` và `/portal` hiện mục “saved on this browser”. Cookie editor vẫn là HttpOnly; link có fragment chỉ dùng để cấp lại cookie khi quay lại. Copy hoặc bookmark recovery link trước khi đổi browser hoặc thiết bị.
+Sau khi editor recovery link được mở, browser lưu link đó trong `localStorage` và create mode ở `/` hiện mục “saved on this browser”. Cookie editor vẫn là HttpOnly; link có fragment chỉ dùng để cấp lại cookie khi quay lại. Copy hoặc bookmark recovery link trước khi đổi browser hoặc thiết bị.
+
+Archive production của `user_01` dùng cùng share-password flow tại `/a/things-i-couldnt-say-in-time`. Nó đọc 13 published entries từ Neon và là dữ liệu thật để smoke-test view mode.
 
 ## Trạng thái kiểm tra — 06/10/2026
 
