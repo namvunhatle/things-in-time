@@ -8,10 +8,17 @@ export default function EditorClaim({ archiveId, archiveTitle, shareSlug }) {
   useEffect(() => {
     let active = true;
     async function claim() {
-      const recoveryUrl = window.location.href;
-      const key = new URLSearchParams(window.location.hash.slice(1)).get('key');
+      let recoveryUrl = window.location.href;
+      let key = new URLSearchParams(window.location.hash.slice(1)).get('key');
       if (!key) {
-        setMessage('this editor recovery link is incomplete.');
+        const stored = localStorage.getItem(`archive_recovery_${archiveId}`) || sessionStorage.getItem(`archive_recovery_${archiveId}`);
+        if (stored) {
+          recoveryUrl = stored;
+          key = new URLSearchParams(new URL(stored).hash.slice(1)).get('key');
+        }
+      }
+      if (!key) {
+        setMessage('open the private editor link once in this browser.');
         return;
       }
       try {

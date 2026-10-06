@@ -243,7 +243,7 @@ export default function ArchiveEditor({ archive }) {
     <header className="editor-bar">
       <div>
         <p className="eyebrow">editor</p>
-        <input className="editor-title" value={title} maxLength={80} aria-label="archive name" onChange={event => setTitle(event.target.value)} onBlur={() => save(itemsRef.current, title, subtitle)} />
+        <textarea className="editor-title" rows={1} value={title} maxLength={80} aria-label="archive name" onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); event.currentTarget.blur(); } }} onChange={event => setTitle(event.target.value)} onBlur={() => save(itemsRef.current, title, subtitle)} />
         <textarea className="editor-subtitle" value={subtitle} maxLength={400} aria-label="archive subtitle" placeholder="subtitle" onChange={event => setSubtitle(event.target.value)} onBlur={() => save(itemsRef.current, title, subtitle)} />
       </div>
       <div className="editor-actions">

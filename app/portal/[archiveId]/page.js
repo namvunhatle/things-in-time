@@ -1,4 +1,4 @@
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import { cookies } from 'next/headers';
 import ArchiveEditor from '../../../components/ArchiveEditor';
 import PersonalArchiveEditor from '../../../components/PersonalArchiveEditor';
@@ -13,7 +13,7 @@ export default async function ArchiveEditorPage({ params }) {
   const archive = await readArchive(archiveId);
   if (!archive) notFound();
   const editorToken = (await cookies()).get(editorCookieName(archiveId))?.value;
-  if (!hasEditorSession(archive, editorToken)) notFound();
+  if (!hasEditorSession(archive, editorToken)) redirect(`/portal/${archiveId}/claim`);
 
   if (archive.presentation === 'timeline') {
     const entries = await readEntries('all', archive.ownerId);

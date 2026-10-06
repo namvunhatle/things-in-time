@@ -122,7 +122,7 @@ export default function PersonalArchiveEditor({ archive, entries: initialEntries
   return <>
     <header className="personal-editor-header">
       <p className="eyebrow">editor</p>
-      <input className="editor-title" value={title} maxLength={80} aria-label="archive title" onChange={event => { setTitle(event.target.value); setStatus('unsaved'); }} onBlur={saveSettings} />
+      <textarea className="editor-title" rows={1} value={title} maxLength={80} aria-label="archive title" onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); event.currentTarget.blur(); } }} onChange={event => { setTitle(event.target.value); setStatus('unsaved'); }} onBlur={saveSettings} />
       <textarea className="editor-subtitle" value={subtitle} maxLength={400} aria-label="archive subtitle" placeholder="subtitle" onChange={event => { setSubtitle(event.target.value); setStatus('unsaved'); }} onBlur={saveSettings} />
       <div className="personal-editor-actions">
         {recoveryUrl && <button type="button" onClick={() => copy(recoveryUrl, 'editor link copied')}>editor link</button>}
