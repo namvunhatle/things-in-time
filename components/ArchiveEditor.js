@@ -3,9 +3,12 @@
 import { useEffect, useRef, useState } from 'react';
 import EncryptedImage from './EncryptedImage';
 import { randomToken } from '../lib/archive-crypto';
+import { isImageFile, prepareImage } from '../lib/prepare-image';
+import { isStacked, readingOrder, sideOf } from '../lib/canvas-order';
 
 const imageUrl = (archiveId, fileName) => `/api/archive-media/${archiveId}/${fileName}`;
-const itemStyle = (item, archive) => ({
+const itemStyle = (item, archive, order = {}) => ({
+  order: order[item.id],
   left: `${item.x / archive.canvas.width * 100}%`,
   top: `${item.y / archive.canvas.height * 100}%`,
   width: `${item.width / archive.canvas.width * 100}%`,
@@ -148,47 +151,58 @@ export default function ArchiveEditor({ archive, secure = null }) {
     }
   }
 
-  async function uploadFiles(files, point, attachedTo = null) {
-    const images = [...files].filter(file => file.type.startsWith('image/'));
-    if (!images.length) return;
-    setStatus('uploading…');
+  async function uploadFiles(files, point, attachedTo = null, alternate = false) {
+    const images = [...files].filter(isImageFile);
+    if (!images.length) {
+      if (files.length) setStatus('choose a photo');
+      return;
+    }
     let next = itemsRef.current;
+    let added = null;
     for (const [index, file] of images.entries()) {
-      if (file.size < 1 || file.size > 10 * 1024 * 1024) {
-        setStatus('image must be smaller than 10 MB');
+      setStatus(images.length > 1 ? `uploading ${index + 1} of ${images.length}…` : 'uploading…');
+      let prepared;
+      try {
+        prepared = await prepareImage(file);
+      } catch (error) {
+        setStatus(error.message);
         return;
       }
+      // stacked (phone) uploads alternate sides so a batch doesn't line up on one edge
+      const x = alternate ? (index % 2 ? 700 - point.x : point.x) : Math.max(0, Math.min(920, point.x + index * 22));
+      const y = Math.max(0, Math.min(820, point.y + index * 22));
       if (secure) {
         try {
-          const fileName = await secure.upload(file);
-          next = [...next, {
-            id: randomToken(12), type: 'image', fileName, contentType: file.type,
-            x: Math.max(0, Math.min(920, point.x + index * 22)), y: Math.max(0, Math.min(820, point.y + index * 22)), width: 280, alt: '', attachedTo,
-          }];
+          const fileName = await secure.upload(prepared.blob);
+          added = { id: randomToken(12), type: 'image', fileName, contentType: prepared.contentType, x, y, width: 280, alt: '', attachedTo };
+          next = [...next, added];
           replaceItems(next);
           await save(next);
           continue;
-        } catch {
-          setStatus('upload failed');
+        } catch (error) {
+          setStatus(error.message || 'upload failed');
           return;
         }
       }
       const data = new FormData();
-      data.set('file', file);
-      data.set('x', String(point.x + index * 22));
-      data.set('y', String(point.y + index * 22));
+      data.set('file', new File([prepared.blob], prepared.contentType === 'image/gif' ? 'photo.gif' : 'photo.jpg', { type: prepared.contentType }));
+      data.set('x', String(x));
+      data.set('y', String(y));
       if (attachedTo) data.set('attachedTo', attachedTo);
       const response = await fetch(`/api/archives/${archive.id}/media`, { method: 'POST', body: data });
-      const result = await response.json();
+      const result = await response.json().catch(() => ({}));
       if (!response.ok) {
         setStatus(result.error || 'upload failed');
         return;
       }
-      next = [...next, result.item];
+      added = result.item;
+      next = [...next, added];
       replaceItems(next);
     }
     setDropTarget(null);
-    setStatus('');
+    setStatus(images.length > 1 ? `${images.length} photos added` : 'photo added');
+    // on a phone the canvas is a single column: show where the photo landed
+    if (added && isStacked()) requestAnimationFrame(() => canvasRef.current?.querySelector(`[data-item="${added.id}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }));
   }
 
   async function addYoutube(event) {
@@ -229,9 +243,16 @@ export default function ArchiveEditor({ archive, secure = null }) {
   }
 
   function choosePhotos(event) {
-    const count = itemsRef.current.filter(item => item.type === 'image').length;
-    uploadFiles(event.target.files, { x: 820 - (count % 4) * 28, y: 80 + (count % 6) * 42 });
+    const files = [...event.target.files];
     event.target.value = '';
+    const count = itemsRef.current.filter(item => item.type === 'image').length;
+    if (isStacked()) {
+      // phone: the photo goes after everything else, alternating sides, so it shows up at the bottom
+      const lowest = itemsRef.current.reduce((max, item) => Math.max(max, item.y), 0);
+      uploadFiles(files, { x: count % 2 ? 80 : 620, y: Math.min(820, lowest + 40) }, null, true);
+      return;
+    }
+    uploadFiles(files, { x: 820 - (count % 4) * 28, y: 80 + (count % 6) * 42 });
   }
 
   function dropOnNote(event, note) {
@@ -245,6 +266,8 @@ export default function ArchiveEditor({ archive, secure = null }) {
   }
 
   function beginMove(event, item) {
+    // stacked phone layout has no positions to drag; let the finger scroll the page
+    if (isStacked()) return;
     event.preventDefault();
     const point = canvasPoint(event.clientX, event.clientY);
     setDragging({ id: item.id, offsetX: point.x - item.x, offsetY: point.y - item.y });
@@ -278,9 +301,11 @@ export default function ArchiveEditor({ archive, secure = null }) {
     }
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', end, { once: true });
+    window.addEventListener('pointercancel', end, { once: true });
     return () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', end);
+      window.removeEventListener('pointercancel', end);
     };
   }, [dragging]);
 
@@ -306,6 +331,8 @@ export default function ArchiveEditor({ archive, secure = null }) {
       setStatus('couldn’t copy recovery link');
     }
   }
+
+  const order = readingOrder(items);
 
   return <>
     <header className="editor-bar">
@@ -338,7 +365,7 @@ export default function ArchiveEditor({ archive, secure = null }) {
       {items.map(item => item.type === 'note' ? <article
         key={item.id}
         className={`canvas-note canvas-entry${dropTarget === item.id ? ' is-drop-target' : ''}`}
-        style={itemStyle(item, archive)}
+        style={itemStyle(item, archive, order)} data-item={item.id}
         onDragEnter={event => { event.preventDefault(); setDropTarget(item.id); }}
         onDragOver={event => event.preventDefault()}
         onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget)) setDropTarget(null); }}
@@ -351,14 +378,14 @@ export default function ArchiveEditor({ archive, secure = null }) {
         <div className="note-writing">
           <textarea ref={node => { if (node) noteRefs.current.set(item.id, node); else noteRefs.current.delete(item.id); }} className="note-editor" value={item.content} maxLength={10000} aria-label={`text dump from ${dateLabel(item.date)}`} placeholder="type it here. leave it rough." onChange={event => editNote(item.id, event.target.value)} onBlur={() => save(itemsRef.current)} />
         </div>
-      </article> : item.type === 'youtube' ? <div key={item.id} className="canvas-item youtube-sticky" style={itemStyle(item, archive)} onPointerDown={event => beginMove(event, item)}>
+      </article> : item.type === 'youtube' ? <div key={item.id} className={`canvas-item youtube-sticky side-${sideOf(item, archive.canvas)}`} style={itemStyle(item, archive, order)} data-item={item.id} onPointerDown={event => beginMove(event, item)}>
         <div className="youtube-frame youtube-placeholder" aria-label="YouTube video preview">
           {item.thumbnailFileName && !secure && <img className="youtube-thumbnail" src={imageUrl(archive.id, item.thumbnailFileName)} alt="" draggable="false" />}
           {secure && <img className="youtube-thumbnail" src={`https://i.ytimg.com/vi/${item.videoId}/hqdefault.jpg`} alt="" draggable="false" referrerPolicy="no-referrer" />}
           <span className="youtube-play" aria-hidden="true">▶</span>
         </div>
         <div className="youtube-card-label"><span>{item.title || 'youtube'}</span></div>
-      </div> : <div key={item.id} className="canvas-item sticky-photo" style={itemStyle(item, archive)} onPointerDown={event => beginMove(event, item)}>
+      </div> : <div key={item.id} className={`canvas-item sticky-photo side-${sideOf(item, archive.canvas)}`} style={itemStyle(item, archive, order)} data-item={item.id} onPointerDown={event => beginMove(event, item)}>
         {secure ? <EncryptedImage archiveId={archive.id} fileName={item.fileName} dataKey={secure.dataKey} contentType={item.contentType} alt={item.alt || ''} draggable="false" /> : <img src={imageUrl(archive.id, item.fileName)} alt={item.alt || ''} draggable="false" />}
       </div>)}
     </div>

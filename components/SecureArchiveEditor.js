@@ -151,12 +151,12 @@ export default function SecureArchiveEditor({ archive }) {
   if (opened.document.presentation === 'timeline') {
     return <>
       {archive.plaintextCleanupPending && <PlaintextCleanup archiveId={archive.id} entryCount={(opened.document.entries || []).length} />}
-      <ViewerPasswordReset archive={archive} />
       <PersonalArchiveEditor archive={identity} entries={opened.document.entries || []} categories={categories} secure={secure} />
+      <ViewerPasswordReset archive={archive} />
     </>;
   }
   return <>
-    <ViewerPasswordReset archive={archive} />
     <ArchiveEditor archive={identity} secure={secure} />
+    <ViewerPasswordReset archive={archive} />
   </>;
 }

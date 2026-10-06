@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import EncryptedImage from './EncryptedImage';
+import { readingOrder, sideOf } from '../lib/canvas-order';
 
 function dateLabel(value) {
   return new Intl.DateTimeFormat('en-US', {
@@ -24,8 +25,9 @@ function tilt(id) {
   return `${(total % 7) - 3}deg`;
 }
 
-function itemStyle(item, archive) {
+function itemStyle(item, archive, order = {}) {
   return {
+    order: order[item.id],
     left: `${item.x / archive.canvas.width * 100}%`,
     top: `${item.y / archive.canvas.height * 100}%`,
     width: `${item.width / archive.canvas.width * 100}%`,
@@ -33,9 +35,9 @@ function itemStyle(item, archive) {
   };
 }
 
-function YoutubePlayer({ item, archive, encrypted = false }) {
+function YoutubePlayer({ item, archive, order, encrypted = false }) {
   const [playing, setPlaying] = useState(false);
-  return <div className="canvas-item youtube-sticky youtube-sticky-view" style={itemStyle(item, archive)}>
+  return <div className={`canvas-item youtube-sticky youtube-sticky-view side-${sideOf(item, archive.canvas)}`} style={itemStyle(item, archive, order)}>
     <div className="youtube-frame">
       {playing ? <iframe
         src={`https://www.youtube-nocookie.com/embed/${item.videoId}?autoplay=1&rel=0`}
@@ -55,12 +57,13 @@ function YoutubePlayer({ item, archive, encrypted = false }) {
 }
 
 export default function ArchiveCanvasView({ archive, dataKey = null }) {
+  const order = readingOrder(archive.items);
   return <div className="archive-canvas viewer-canvas wysiwyg-canvas" style={{ aspectRatio: `${archive.canvas.width} / ${archive.canvas.height}` }}>
     {!archive.items.length && <p className="viewer-empty">nothing here yet.</p>}
     {archive.items.map(item => item.type === 'note' ? item.content?.trim() ? <article
       key={item.id}
       className="canvas-note canvas-entry canvas-note-view"
-      style={itemStyle(item, archive)}
+      style={itemStyle(item, archive, order)}
       lang="en"
     >
       <div className="note-meta">
@@ -68,10 +71,10 @@ export default function ArchiveCanvasView({ archive, dataKey = null }) {
         {item.time && <span>{timeLabel(item.time)}</span>}
       </div>
       <div className="note-content">{paragraphs(item.content)}</div>
-    </article> : null : item.type === 'youtube' ? <YoutubePlayer key={item.id} item={item} archive={archive} encrypted={Boolean(dataKey)} /> : <figure
+    </article> : null : item.type === 'youtube' ? <YoutubePlayer key={item.id} item={item} archive={archive} order={order} encrypted={Boolean(dataKey)} /> : <figure
       key={item.id}
-      className="canvas-item sticky-photo sticky-photo-view"
-      style={itemStyle(item, archive)}
+      className={`canvas-item sticky-photo sticky-photo-view side-${sideOf(item, archive.canvas)}`}
+      style={itemStyle(item, archive, order)}
     >
       {dataKey ? <EncryptedImage archiveId={archive.id} fileName={item.fileName} dataKey={dataKey} contentType={item.contentType} alt={item.alt || ''} loading="lazy" decoding="async" /> : <img src={`/api/archive-media/${archive.id}/${item.fileName}`} alt={item.alt || ''} loading="lazy" decoding="async" />}
     </figure>)}
