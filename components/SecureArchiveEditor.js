@@ -2,13 +2,19 @@
 
 import { useEffect, useState } from 'react';
 import ArchiveEditor from './ArchiveEditor';
-import PersonalArchiveEditor from './PersonalArchiveEditor';
 import { createEncryptedMedia, decryptDocument, decryptLinkSecret, editorAuthSecret, encryptDocument, resetViewerPassword } from '../lib/archive-crypto';
 import { loadArchiveKey, rememberArchive } from '../lib/key-vault';
+import { timelineToCanvas } from '../lib/canvas-layout';
 
-const categories = {
-  all: 'all', understood: 'things i understood too late', miss: 'things i miss', songs: 'songs', home: 'our home', unsaid: 'things i never said',
-};
+async function saveDocument(archiveId, dataKey, document) {
+  const encrypted = await encryptDocument(archiveId, dataKey, document);
+  const response = await fetch(`/api/archives/${archiveId}/layout`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ document: encrypted }),
+  });
+  if (!response.ok) throw new Error('save failed');
+}
 
 // Shown once a legacy archive has been encrypted: its old plaintext copy still sits on the server
 // until the owner removes it. The server refuses if the encrypted copy has fewer entries.
@@ -110,15 +116,26 @@ export default function SecureArchiveEditor({ archive }) {
         window.location.replace(`/portal/${archive.id}/claim`);
         return;
       }
+      let document;
+      let linkSecret;
       try {
-        const document = await decryptDocument(archive.id, dataKey, archive.crypto.document);
-        const linkSecret = await decryptLinkSecret(archive.id, dataKey, archive.crypto.linkSecretWrap);
-        const shareUrl = `${window.location.origin}/a/${archive.shareSlug}#${linkSecret}`;
-        rememberArchive({ id: archive.id, shareSlug: archive.shareSlug, title: document.title });
-        if (active) setOpened({ dataKey, document, shareUrl });
+        document = await decryptDocument(archive.id, dataKey, archive.crypto.document);
+        linkSecret = await decryptLinkSecret(archive.id, dataKey, archive.crypto.linkSecretWrap);
       } catch {
         if (active) setError('this browser’s key could not open the archive. open it again with your recovery key.');
+        return;
       }
+      let converted = false;
+      // the first archive was a timeline with its own form editor: move it onto the canvas once,
+      // here in the browser, since only the browser can decrypt it. If this save fails, the next
+      // edit saves the converted document anyway (secure.save spreads it), so open it regardless.
+      if (document.presentation === 'timeline') {
+        document = timelineToCanvas(document);
+        converted = await saveDocument(archive.id, dataKey, document).then(() => true, () => 'unsaved');
+      }
+      const shareUrl = `${window.location.origin}/a/${archive.shareSlug}#${linkSecret}`;
+      rememberArchive({ id: archive.id, shareSlug: archive.shareSlug, title: document.title });
+      if (active) setOpened({ dataKey, document, shareUrl, converted });
     }
     open();
     return () => { active = false; };
@@ -129,13 +146,8 @@ export default function SecureArchiveEditor({ archive }) {
   const secure = {
     dataKey: opened.dataKey,
     async save(document) {
-      const encrypted = await encryptDocument(archive.id, opened.dataKey, document);
-      const response = await fetch(`/api/archives/${archive.id}/layout`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ document: encrypted }),
-      });
-      if (!response.ok) throw new Error('save failed');
+      // keep fields the canvas editor doesn't know about, such as legacyTimeline
+      await saveDocument(archive.id, opened.dataKey, { ...opened.document, ...document });
     },
     async upload(file) {
       const encrypted = await createEncryptedMedia(archive.id, opened.dataKey, await file.arrayBuffer());
@@ -148,14 +160,10 @@ export default function SecureArchiveEditor({ archive }) {
     },
   };
   const identity = { id: archive.id, shareSlug: archive.shareSlug, shareUrl: opened.shareUrl, ...opened.document };
-  if (opened.document.presentation === 'timeline') {
-    return <>
-      {archive.plaintextCleanupPending && <PlaintextCleanup archiveId={archive.id} entryCount={(opened.document.entries || []).length} />}
-      <PersonalArchiveEditor archive={identity} entries={opened.document.entries || []} categories={categories} secure={secure} />
-      <ViewerPasswordReset archive={archive} />
-    </>;
-  }
+  const legacyEntries = opened.document.legacyTimeline?.entries || [];
   return <>
+    {archive.plaintextCleanupPending && <PlaintextCleanup archiveId={archive.id} entryCount={legacyEntries.length} />}
+    {opened.converted && <section className="migration-card" role="status"><p>this archive now uses the canvas editor. your {legacyEntries.length} entries are notes, newest at the top. the original entries are kept, encrypted, inside the archive.{opened.converted === 'unsaved' && ' it isn’t saved yet: your next edit saves it.'}</p></section>}
     <ArchiveEditor archive={identity} secure={secure} />
     <ViewerPasswordReset archive={archive} />
   </>;

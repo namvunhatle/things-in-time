@@ -5,6 +5,7 @@ import EncryptedImage from './EncryptedImage';
 import { randomToken } from '../lib/archive-crypto';
 import { isImageFile, prepareImage } from '../lib/prepare-image';
 import { isStacked, readingOrder, sideOf } from '../lib/canvas-order';
+import { ITEM_GAP, fittedCanvas, lowestBottom } from '../lib/canvas-layout';
 
 const imageUrl = (archiveId, fileName) => `/api/archive-media/${archiveId}/${fileName}`;
 const itemStyle = (item, archive, order = {}) => ({
@@ -27,11 +28,11 @@ function timeLabel(value) {
   return `${hour % 12 || 12}:${String(minute).padStart(2, '0')}${hour < 12 ? 'am' : 'pm'}`;
 }
 
-function newNote(count) {
+function newNote(y) {
   const now = new Date();
   const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ho_Chi_Minh', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(now);
   const value = type => parts.find(part => part.type === type)?.value;
-  return { id: randomToken(12), type: 'note', date: `${value('year')}-${value('month')}-${value('day')}`, time: `${value('hour')}:${value('minute')}`, content: '', x: 0, y: Math.min(760, 62 + count * 260), width: 728 };
+  return { id: randomToken(12), type: 'note', date: `${value('year')}-${value('month')}-${value('day')}`, time: `${value('hour')}:${value('minute')}`, content: '', x: 0, y, width: 728 };
 }
 
 function youtubeVideoId(value) {
@@ -56,6 +57,9 @@ export default function ArchiveEditor({ archive, secure = null }) {
   const [dropTarget, setDropTarget] = useState(null);
   const [recoveryUrl, setRecoveryUrl] = useState('');
   const [youtubeUrl, setYoutubeUrl] = useState('');
+  // encrypted archives grow taller as they fill up; legacy ones keep the server's fixed size
+  const [canvas, setCanvas] = useState(archive.canvas);
+  const canvasSize = useRef(archive.canvas);
   const canvasRef = useRef(null);
   const itemsRef = useRef(items);
   const noteRefs = useRef(new Map());
@@ -91,12 +95,27 @@ export default function ArchiveEditor({ archive, secure = null }) {
   function canvasPoint(clientX, clientY) {
     const rect = canvasRef.current.getBoundingClientRect();
     return {
-      x: (clientX - rect.left) / rect.width * archive.canvas.width,
-      y: (clientY - rect.top) / rect.height * archive.canvas.height,
+      x: (clientX - rect.left) / rect.width * canvasSize.current.width,
+      y: (clientY - rect.top) / rect.height * canvasSize.current.height,
     };
   }
 
+  function grow(nextItems) {
+    const fitted = fittedCanvas(canvasSize.current, nextItems);
+    if (fitted.height !== canvasSize.current.height) {
+      canvasSize.current = fitted;
+      setCanvas(fitted);
+    }
+    return fitted;
+  }
+
+  // where the next item goes: below everything else
+  function nextFreeY() {
+    return itemsRef.current.length ? Math.round(lowestBottom(itemsRef.current) + ITEM_GAP) : 62;
+  }
+
   function replaceItems(updater) {
+    if (secure && Array.isArray(updater)) grow(updater);
     setItems(current => {
       const next = typeof updater === 'function' ? updater(current) : updater;
       itemsRef.current = next;
@@ -108,7 +127,7 @@ export default function ArchiveEditor({ archive, secure = null }) {
     setStatus('saving…');
     try {
       if (secure) {
-        await secure.save({ presentation: 'canvas', title: nextTitle, subtitle: nextSubtitle, canvas: archive.canvas, items: nextItems });
+        await secure.save({ presentation: 'canvas', title: nextTitle, subtitle: nextSubtitle, canvas: grow(nextItems), items: nextItems });
         setStatus('');
         return;
       }
@@ -129,7 +148,7 @@ export default function ArchiveEditor({ archive, secure = null }) {
     setStatus('adding note…');
     try {
       if (secure) {
-        const item = newNote(count);
+        const item = newNote(nextFreeY());
         const next = [...itemsRef.current, item];
         replaceItems(next);
         await save(next);
@@ -169,8 +188,8 @@ export default function ArchiveEditor({ archive, secure = null }) {
         return;
       }
       // stacked (phone) uploads alternate sides so a batch doesn't line up on one edge
-      const x = alternate ? (index % 2 ? 700 - point.x : point.x) : Math.max(0, Math.min(920, point.x + index * 22));
-      const y = Math.max(0, Math.min(820, point.y + index * 22));
+      const x = alternate ? (index % 2 ? 700 - point.x : point.x) : Math.max(0, Math.min(canvasSize.current.width - 280, point.x + index * 22));
+      const y = secure ? Math.max(0, point.y + index * 22) : Math.max(0, Math.min(canvasSize.current.height - 80, point.y + index * 22));
       if (secure) {
         try {
           const fileName = await secure.upload(prepared.blob);
@@ -214,7 +233,7 @@ export default function ArchiveEditor({ archive, secure = null }) {
       if (secure) {
         const videoId = youtubeVideoId(youtubeUrl);
         if (!videoId) throw new Error('paste a valid YouTube link');
-        const item = { id: randomToken(12), type: 'youtube', videoId, x: Math.max(0, 760 - count * 24), y: Math.min(660, 90 + count * 230), width: 360 };
+        const item = { id: randomToken(12), type: 'youtube', videoId, x: Math.max(0, 760 - (count % 4) * 24), y: nextFreeY(), width: 360 };
         const next = [...itemsRef.current, item];
         replaceItems(next);
         await save(next);
@@ -248,8 +267,7 @@ export default function ArchiveEditor({ archive, secure = null }) {
     const count = itemsRef.current.filter(item => item.type === 'image').length;
     if (isStacked()) {
       // phone: the photo goes after everything else, alternating sides, so it shows up at the bottom
-      const lowest = itemsRef.current.reduce((max, item) => Math.max(max, item.y), 0);
-      uploadFiles(files, { x: count % 2 ? 80 : 620, y: Math.min(820, lowest + 40) }, null, true);
+      uploadFiles(files, { x: count % 2 ? 80 : 620, y: secure ? nextFreeY() : Math.min(canvasSize.current.height - 80, itemsRef.current.reduce((max, item) => Math.max(max, item.y), 0) + 40) }, null, true);
       return;
     }
     uploadFiles(files, { x: 820 - (count % 4) * 28, y: 80 + (count % 6) * 42 });
@@ -260,7 +278,7 @@ export default function ArchiveEditor({ archive, secure = null }) {
     event.stopPropagation();
     setDropTarget(null);
     uploadFiles(event.dataTransfer.files, {
-      x: Math.min(archive.canvas.width - 280, note.x + note.width + 28),
+      x: Math.min(canvasSize.current.width - 280, note.x + note.width + 28),
       y: note.y,
     }, note.id);
   }
@@ -280,16 +298,16 @@ export default function ArchiveEditor({ archive, secure = null }) {
       replaceItems(current => {
         const moved = current.find(item => item.id === dragging.id);
         if (!moved) return current;
-        const x = Math.max(0, Math.min(archive.canvas.width - moved.width, point.x - dragging.offsetX));
-        const y = Math.max(0, Math.min(archive.canvas.height - 40, point.y - dragging.offsetY));
+        const x = Math.max(0, Math.min(canvasSize.current.width - moved.width, point.x - dragging.offsetX));
+        const y = Math.max(0, Math.min(canvasSize.current.height - 40, point.y - dragging.offsetY));
         const dx = x - moved.x;
         const dy = y - moved.y;
         return current.map(item => {
           if (item.id === moved.id) return { ...item, x, y };
           if (moved.type === 'note' && item.attachedTo === moved.id) return {
             ...item,
-            x: Math.max(0, Math.min(archive.canvas.width - item.width, item.x + dx)),
-            y: Math.max(0, Math.min(archive.canvas.height - 40, item.y + dy)),
+            x: Math.max(0, Math.min(canvasSize.current.width - item.width, item.x + dx)),
+            y: Math.max(0, Math.min(canvasSize.current.height - 40, item.y + dy)),
           };
           return item;
         });
@@ -361,11 +379,11 @@ export default function ArchiveEditor({ archive, secure = null }) {
         {status && <span className="editor-status" role="status">{status}</span>}
       </div>
     </header>
-    <div ref={canvasRef} className={`archive-canvas editor-canvas${dragging ? ' is-dragging' : ''}`} style={{ aspectRatio: `${archive.canvas.width} / ${archive.canvas.height}` }} onDragOver={event => event.preventDefault()} onDrop={dropOnCanvas}>
+    <div ref={canvasRef} className={`archive-canvas editor-canvas${dragging ? ' is-dragging' : ''}`} style={{ aspectRatio: `${canvas.width} / ${canvas.height}` }} onDragOver={event => event.preventDefault()} onDrop={dropOnCanvas}>
       {items.map(item => item.type === 'note' ? <article
         key={item.id}
         className={`canvas-note canvas-entry${dropTarget === item.id ? ' is-drop-target' : ''}`}
-        style={itemStyle(item, archive, order)} data-item={item.id}
+        style={itemStyle(item, { canvas }, order)} data-item={item.id}
         onDragEnter={event => { event.preventDefault(); setDropTarget(item.id); }}
         onDragOver={event => event.preventDefault()}
         onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget)) setDropTarget(null); }}
@@ -378,14 +396,14 @@ export default function ArchiveEditor({ archive, secure = null }) {
         <div className="note-writing">
           <textarea ref={node => { if (node) noteRefs.current.set(item.id, node); else noteRefs.current.delete(item.id); }} className="note-editor" value={item.content} maxLength={10000} aria-label={`text dump from ${dateLabel(item.date)}`} placeholder="type it here. leave it rough." onChange={event => editNote(item.id, event.target.value)} onBlur={() => save(itemsRef.current)} />
         </div>
-      </article> : item.type === 'youtube' ? <div key={item.id} className={`canvas-item youtube-sticky side-${sideOf(item, archive.canvas)}`} style={itemStyle(item, archive, order)} data-item={item.id} onPointerDown={event => beginMove(event, item)}>
+      </article> : item.type === 'youtube' ? <div key={item.id} className={`canvas-item youtube-sticky side-${sideOf(item, canvas)}`} style={itemStyle(item, { canvas }, order)} data-item={item.id} onPointerDown={event => beginMove(event, item)}>
         <div className="youtube-frame youtube-placeholder" aria-label="YouTube video preview">
           {item.thumbnailFileName && !secure && <img className="youtube-thumbnail" src={imageUrl(archive.id, item.thumbnailFileName)} alt="" draggable="false" />}
           {secure && <img className="youtube-thumbnail" src={`https://i.ytimg.com/vi/${item.videoId}/hqdefault.jpg`} alt="" draggable="false" referrerPolicy="no-referrer" />}
           <span className="youtube-play" aria-hidden="true">▶</span>
         </div>
         <div className="youtube-card-label"><span>{item.title || 'youtube'}</span></div>
-      </div> : <div key={item.id} className={`canvas-item sticky-photo side-${sideOf(item, archive.canvas)}`} style={itemStyle(item, archive, order)} data-item={item.id} onPointerDown={event => beginMove(event, item)}>
+      </div> : <div key={item.id} className={`canvas-item sticky-photo side-${sideOf(item, canvas)}`} style={itemStyle(item, { canvas }, order)} data-item={item.id} onPointerDown={event => beginMove(event, item)}>
         {secure ? <EncryptedImage archiveId={archive.id} fileName={item.fileName} dataKey={secure.dataKey} contentType={item.contentType} alt={item.alt || ''} draggable="false" /> : <img src={imageUrl(archive.id, item.fileName)} alt={item.alt || ''} draggable="false" />}
       </div>)}
     </div>
