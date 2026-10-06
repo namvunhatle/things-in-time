@@ -9,7 +9,7 @@ export default async function Archive({ searchParams }) {
   if (!hasAccess((await cookies()).get(COOKIE)?.value)) redirect('/unlock');
   const params = await searchParams;
   const category = Object.hasOwn(categories, params.category || '') ? params.category : 'all';
-  const entries = readEntries(category);
+  const entries = await readEntries(category);
   return <div className="notebook">
     <header className="opening">
       <h1>things i couldn’t<br className="desktop-break" /> say in time</h1>

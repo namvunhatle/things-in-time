@@ -9,5 +9,5 @@ export default async function EditorClaimPage({ params }) {
   const { archiveId } = await params;
   const archive = await readArchive(archiveId);
   if (!archive) notFound();
-  return <EditorClaim archiveId={archiveId} archiveTitle={archive.title} />;
+  return <EditorClaim archiveId={archiveId} archiveTitle={archive.title} shareSlug={archive.shareSlug || archive.id} />;
 }

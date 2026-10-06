@@ -24,7 +24,7 @@ export default function RecentArchives() {
     <p className="eyebrow">saved on this browser</p>
     <ul>{archives.map(archive => <li key={archive.id}>
       <span>{archive.title || 'untitled archive'}</span>
-      <div><a href={archive.recoveryUrl}>continue editing</a><a href={`/a/${archive.id}`} target="_blank" rel="noreferrer">view ↗</a></div>
+      <div><a href={archive.recoveryUrl}>continue editing</a><a href={`/a/${archive.shareSlug || archive.id}`} target="_blank" rel="noreferrer">view ↗</a></div>
     </li>)}</ul>
   </section>;
 }

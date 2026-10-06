@@ -14,6 +14,6 @@ export default async function ArchiveEditorPage({ params }) {
   if (!hasEditorSession(archive, editorToken)) notFound();
 
   return <main id="main" className="editor-shell">
-    <ArchiveEditor archive={{ id: archive.id, title: archive.title, canvas: archive.canvas, items: archive.items }} />
+    <ArchiveEditor archive={{ id: archive.id, shareSlug: archive.shareSlug || archive.id, title: archive.title, canvas: archive.canvas, items: archive.items }} />
   </main>;
 }

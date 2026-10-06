@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 
-export default function EditorClaim({ archiveId, archiveTitle }) {
+export default function EditorClaim({ archiveId, archiveTitle, shareSlug }) {
   const [message, setMessage] = useState('securing your editor…');
 
   useEffect(() => {
@@ -23,7 +23,7 @@ export default function EditorClaim({ archiveId, archiveTitle }) {
         if (!response.ok) throw new Error('editor access denied.');
         localStorage.setItem(`archive_recovery_${archiveId}`, recoveryUrl);
         const recent = JSON.parse(localStorage.getItem('archive_recent') || '[]').filter(item => item.id !== archiveId);
-        recent.unshift({ id: archiveId, title: archiveTitle, recoveryUrl, lastOpened: new Date().toISOString() });
+        recent.unshift({ id: archiveId, shareSlug, title: archiveTitle, recoveryUrl, lastOpened: new Date().toISOString() });
         localStorage.setItem('archive_recent', JSON.stringify(recent.slice(0, 20)));
         window.location.replace(`/portal/${archiveId}`);
       } catch (error) {
@@ -32,7 +32,7 @@ export default function EditorClaim({ archiveId, archiveTitle }) {
     }
     claim();
     return () => { active = false; };
-  }, [archiveId, archiveTitle]);
+  }, [archiveId, archiveTitle, shareSlug]);
 
   return <main id="main" className="gate"><p className="eyebrow">archive editor</p><h1>{message}</h1></main>;
 }

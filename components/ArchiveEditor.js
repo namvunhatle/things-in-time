@@ -33,7 +33,7 @@ export default function ArchiveEditor({ archive }) {
   const canvasRef = useRef(null);
   const itemsRef = useRef(items);
   const noteRefs = useRef(new Map());
-  const shareUrl = typeof window === 'undefined' ? `/a/${archive.id}` : `${window.location.origin}/a/${archive.id}`;
+  const shareUrl = typeof window === 'undefined' ? `/a/${archive.shareSlug}` : `${window.location.origin}/a/${archive.shareSlug}`;
 
   useEffect(() => { itemsRef.current = items; }, [items]);
   useEffect(() => {
@@ -43,10 +43,10 @@ export default function ArchiveEditor({ archive }) {
       localStorage.setItem(key, stored);
       try {
         const recent = JSON.parse(localStorage.getItem('archive_recent') || '[]').filter(item => item.id !== archive.id);
-        recent.unshift({ id: archive.id, title: archive.title, recoveryUrl: stored, lastOpened: new Date().toISOString() });
+        recent.unshift({ id: archive.id, shareSlug: archive.shareSlug, title: archive.title, recoveryUrl: stored, lastOpened: new Date().toISOString() });
         localStorage.setItem('archive_recent', JSON.stringify(recent.slice(0, 20)));
       } catch {
-        localStorage.setItem('archive_recent', JSON.stringify([{ id: archive.id, title: archive.title, recoveryUrl: stored, lastOpened: new Date().toISOString() }]));
+        localStorage.setItem('archive_recent', JSON.stringify([{ id: archive.id, shareSlug: archive.shareSlug, title: archive.title, recoveryUrl: stored, lastOpened: new Date().toISOString() }]));
       }
     }
     setRecoveryUrl(stored);
@@ -240,7 +240,7 @@ export default function ArchiveEditor({ archive }) {
         </form>
         {recoveryUrl && <button type="button" onClick={copyRecoveryLink}>copy editor recovery link</button>}
         <button type="button" onClick={copyShareLink}>copy share link</button>
-        <a href={`/a/${archive.id}`} target="_blank" rel="noreferrer">open view ↗</a>
+        <a href={`/a/${archive.shareSlug}`} target="_blank" rel="noreferrer">open view ↗</a>
       </div>
     </header>
     <div className="editor-help">add a text dump, drop in photos, or paste a YouTube link. photos and videos can all be moved freely.</div>

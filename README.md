@@ -9,7 +9,7 @@ Một archive riêng tư, theo thời gian. Không analytics, không feed mạng
 3. Xóa `draft: true` khi muốn hiển thị.
 4. Chạy `npm run check`, rồi `npx vercel --prod` để cập nhật site. Local Markdown không tự upload khi save.
 
-Ba entry đang hiển thị lấy nguyên văn từ ví dụ trong brief. Ngày là ngày dựng bản mẫu. Chúng là nội dung mẫu, không phải lời ghi chép mới được viết thay bạn. Các ví dụ ảnh, nhạc, mixed và unfinished nằm riêng trong `content/examples/`, không xuất hiện trên site.
+Mười ba entry English đã duyệt là archive production của `user_01`. Chúng được lưu local trong `.confidential/entries/` để biên tập và được migrate vào Neon khi publish. Các ví dụ ảnh, nhạc, mixed và unfinished nằm riêng trong `content/examples/`, không xuất hiện trên site.
 
 ### Header của entry
 
@@ -64,13 +64,13 @@ Mở `http://127.0.0.1:3000/portal` để tạo một archive mới. Mỗi archi
 - ảnh cũng có thể được thả tự do; JPG/PNG/WebP/GIF/AVIF, tối đa 10 MB mỗi file
 - dán link YouTube, youtu.be hoặc Shorts để tạo video card kéo-thả; thumbnail được cache riêng trong archive và player chỉ tải sau khi người xem bấm play
 
-Dữ liệu demo nằm trong `.archive-data/` và bị Git ignore. Share URL local chỉ hoạt động trên chính máy đang chạy server. Trước khi gửi link qua internet hoặc deploy lên Vercel, cần thay local filesystem bằng persistent database + object storage; filesystem của serverless deployment không phải nơi lưu archive lâu dài.
+Dữ liệu canvas local nằm trong `.archive-data/` và bị Git ignore. Production lưu archive JSON trong Neon và ảnh trong private Vercel Blob. Share URL dùng slug dễ đọc; editor URL vẫn giữ recovery key trong fragment và phải được giữ riêng tư.
 
 Sau khi editor recovery link được mở, browser lưu link đó trong `localStorage` và `/portal` hiện mục “saved on this browser”. Cookie editor vẫn là HttpOnly; link có fragment chỉ dùng để cấp lại cookie khi quay lại. Copy hoặc bookmark recovery link trước khi đổi browser hoặc thiết bị.
 
-## Trạng thái kiểm tra — 05/10/2026
+## Trạng thái kiểm tra — 06/10/2026
 
-Dependencies đã cài đủ. Production build Next.js 16.3.8 đã thành công. Kiểm tra nội dung, thứ tự thời gian, filter, loại draft và nhãn ngày/giờ đã qua. Logic passcode đã qua kiểm tra: đóng khi thiếu cấu hình, đúng/sai mã, chữ ký, thời hạn và thu hồi session khi đổi mã. Review source đã kiểm tra noindex, bảo vệ media và nội dung mẫu. Chưa xác nhận giao diện trong trình duyệt hoặc deployment: môi trường thực thi chặn truy cập mạng và chặn mở cổng localhost. Không có URL production đã được xác nhận.
+Dependencies đã cài đủ và audit không còn vulnerability đã biết. Production build Next.js 16.3.8 đã thành công. Password gate, 13 entry từ Neon và toàn bộ flow tạo archive → editor recovery link → text dump → share password → reader view đã qua smoke test trên `https://things-in-time.vercel.app`. Test archive tạm đã được xóa sau khi kiểm tra.
 
 ## Vercel
 
@@ -80,7 +80,7 @@ Cách ngắn nhất, khi terminal có mạng và đã đăng nhập Vercel:
 npm run publish
 ```
 
-Lệnh này cài dependencies, tạo passcode riêng trong `.env.local` nếu chưa có, chạy production build, tạo project có tên ngẫu nhiên, đặt env riêng tư rồi deploy. Nếu build hoặc đăng nhập thất bại, lệnh dừng trước khi upload. Sau đó vẫn cần mở URL trên điện thoại và kiểm tra gate, filter, ảnh và noindex. `npm run publish` chưa được chạy end-to-end trong môi trường hiện tại.
+Trước lần deploy đầu tiên, chạy `npm run migrate:production-data` để đưa riêng các entry đã publish lên Neon. Canvas demo và media local chỉ được migrate khi chủ động chạy `npm run migrate:canvas-data`. `npm run publish` cài dependencies, giữ passcode hiện có, chạy production build, đặt env riêng tư rồi deploy.
 
 Hoặc chạy từng bước:
 
@@ -117,7 +117,7 @@ Chạy `npm run rotate-secrets` để thay passcode, session secret và mọi ed
 
 Gate xác thực ở server; nội dung và ảnh không được gửi trước khi nhập đúng passcode. Cookie HttpOnly, SameSite Strict, Secure trên production; session được ký HMAC và đổi passcode sẽ vô hiệu hóa cookie cũ. HTML/ảnh không cache. Metadata và response header luôn có noindex/nofollow; robots.txt chặn crawler. Không sitemap.
 
-Đây là gate dùng chung, không phải tài khoản riêng. Người có passcode có thể lưu/chụp/chia sẻ nội dung. Vercel giữ source và nội dung server theo cách vận hành hosting thông thường. Giữ repo private nếu sau này nối Git; không đặt ảnh riêng trong public/. Không có database/CMS phải trả phí.
+Đây là gate dùng chung, không phải account system. Người có passcode có thể lưu/chụp/chia sẻ nội dung. Vercel giữ source và runtime secrets; Neon giữ dữ liệu archive; private Vercel Blob giữ media. Repo phải luôn private và ảnh riêng không được đặt trong `public/`.
 
 ## Đổi title
 

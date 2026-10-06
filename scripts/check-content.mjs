@@ -1,14 +1,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import matter from 'gray-matter';
 import { confidentialEntriesDirectory, confidentialPhotosDirectory } from '../lib/confidential-paths.js';
+import { parseMarkdownEntry } from '../lib/markdown-entry.js';
 
 const categories = ['understood', 'miss', 'songs', 'home', 'unsaid'];
 let count = 0;
 fs.mkdirSync(confidentialEntriesDirectory, { recursive: true, mode: 0o700 });
 fs.mkdirSync(confidentialPhotosDirectory, { recursive: true, mode: 0o700 });
 for (const file of fs.readdirSync(confidentialEntriesDirectory).filter(f => f.endsWith('.md'))) {
-  const { data, content } = matter(fs.readFileSync(path.join(confidentialEntriesDirectory, file), 'utf8'));
+  const { data, content } = parseMarkdownEntry(fs.readFileSync(path.join(confidentialEntriesDirectory, file), 'utf8'));
   if (data.draft) continue;
   const fail = message => { throw new Error(`${file}: ${message}`); };
   if (data.lang !== 'en') fail('published entries must declare lang: en');

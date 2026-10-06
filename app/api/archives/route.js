@@ -12,7 +12,7 @@ export async function POST(request) {
     const { archive, editorKey } = await createArchive(body);
     const editorUrl = new URL(`/portal/${archive.id}/claim`, base);
     editorUrl.hash = `key=${encodeURIComponent(editorKey)}`;
-    return Response.json({ id: archive.id, editorUrl: editorUrl.toString(), shareUrl: new URL(`/a/${archive.id}`, base).toString() }, { status: 201 });
+    return Response.json({ id: archive.id, shareSlug: archive.shareSlug, editorUrl: editorUrl.toString(), shareUrl: new URL(`/a/${archive.shareSlug}`, base).toString() }, { status: 201 });
   } catch (error) {
     return Response.json({ error: error.message || 'couldn’t create the archive.' }, { status: 400 });
   }
